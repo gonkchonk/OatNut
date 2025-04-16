@@ -3,22 +3,7 @@
 **OatNut** is a real-time MMO game project built with **Flask** (Python) and **Flask-SocketIO**.  
 It uses **Docker Compose** to run both the web server and a database in separate containers.
 
-## Project Structure
-OatNut/
-├─ app/
-│  ├─ init.py     # Initializes Flask & SocketIO
-│  ├─ models/         # Database models & schemas
-│  ├─ routes/         # Flask “blueprints” for HTTP endpoints (login, register, etc.)
-│  ├─ socket/         # SocketIO event handlers for real-time game logic
-│  └─ templates/      # HTML templates (e.g., index.html)
-├─ logs/              # Stores application logs outside the Docker container
-├─ .env               # Environment variables (DB connection strings, secrets)
-├─ .gitignore         # Files and folders for Git to ignore
-├─ docker-compose.yml # Defines our Docker services (Flask + DB)
-├─ Dockerfile         # Instructions for building the Flask app container
-├─ requirements.txt   # Python dependencies (Flask, Flask-SocketIO, etc.)
-├─ run.py             # Entry point to run the Flask + SocketIO server
-└─ README.md 
+
 ### **`app/` Folder**
 
 - **`__init__.py`**  
@@ -39,10 +24,7 @@ OatNut/
 
 ### **`logs/` Folder**
 
-A local directory for storing server logs. By mapping it as a volume in Docker, you can review your logs even after containers shut down. This includes:
-- **app.log** for request/response logs
-- **errors.log** for error stack traces
-- Possibly a **raw traffic** log if required
+A local directory for storing server logs. By mapping it as a volume in Docker, you can review your logs even after containers shut down.
 
 ### **Other Root Files**
 
@@ -66,13 +48,3 @@ A local directory for storing server logs. By mapping it as a volume in Docker, 
 
 - **`run.py`**  
   A simple Python script to import your `create_app()` function and run `socketio.run(app, host="0.0.0.0", port=8080)` so the server listens on port 8080.
-
----
-
-## How to Use
-
-1. **Install Docker** on your machine (Mac/Windows/Linux).
-2. **Clone the Repo**:
-   ```bash
-   git clone https://github.com/YourTeam/OatNut.git
-   cd OatNut
