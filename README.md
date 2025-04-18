@@ -1,50 +1,35 @@
-# OatNut
+# Super Smash Bros-like MMO Game
 
-**OatNut** is a real-time MMO game project built with **Flask** (Python) and **Flask-SocketIO**.  
-It uses **Docker Compose** to run both the web server and a database in separate containers.
+A multiplayer online game built with Flask, WebSocket, and MongoDB.
 
+## Setup
 
-### **`app/` Folder**
+1. Make sure you have Docker installed
+3. Run `docker compose up` in the root directory
+4. Visit `http://localhost:8080` in your browser
 
-- **`__init__.py`**  
-  This is where we create and configure the Flask app. We also initialize SocketIO (`socketio.init_app(app)`) so our server supports real-time connections.
+## Development
 
-- **`models/`**  
-  Holds any database model code or schema definitions (e.g., a `User` model).
+The project structure is organized as follows:
 
-- **`routes/`**  
-  Contains Python files with Flask route definitions (`auth.py`, `game.py`, etc.).  
-  - For instance, you might have `/register` and `/login` routes in an `auth.py` blueprint.
-
-- **`socket/`**  
-  Houses **SocketIO** event-handler files. For example, `game_events.py` might listen for `'move'` events or `'attack'` events and broadcast updated states to all connected players.
-
-- **`templates/`**  
-  A directory for HTML template files served by Flask. Right now it has `index.html`, which could be the main page or the game canvas. If you add more pages, they go here.
-
-### **`logs/` Folder**
-
-A local directory for storing server logs. By mapping it as a volume in Docker, you can review your logs even after containers shut down.
-
-### **Other Root Files**
-
-- **`.env`**  
-  Where you’ll keep environment-specific variables like `SECRET_KEY`, database credentials, etc. Make sure `.env` is in `.gitignore` so sensitive info isn’t committed.
-
-- **`.gitignore`**  
-  Tells Git which files/folders to skip in commits (e.g., `__pycache__`, `.env`, log files, etc.).
-
-- **`docker-compose.yml`**  
-  Defines our **services**:
-  1. The Flask app container (based on the `Dockerfile`).
-  2. A database container (MongoDB/Postgres) with volumes.  
-  You’ll run your app using `docker compose up` on port 8080.
-
-- **`Dockerfile`**  
-  Tells Docker how to build the Flask app image (install dependencies from `requirements.txt`, copy code, etc.).
-
-- **`requirements.txt`**  
-  Lists Python packages needed (Flask, Flask-SocketIO, eventlet or gevent, database drivers, etc.).
-
-- **`run.py`**  
-  A simple Python script to import your `create_app()` function and run `socketio.run(app, host="0.0.0.0", port=8080)` so the server listens on port 8080.
+```
+.
+├── backend/               # Flask backend
+│   ├── __pycache__
+│   ├── app.py            # Main Flask application
+│   ├── models/           # Database models
+│   ├── routes/           # API routes
+│   ├── sockets/          # WebSocket handlers
+│   └── utils/            # Utility functions
+├── frontend/             # Frontend assets
+│   ├── static/           # Static files (CSS, JS)
+│   │   ├── css/
+│   │   ├── js/
+│   │   └── assets/      # Game assets (sprites, sounds)
+│   └── templates/        # Jinja2 templates
+├── logs/                 # Application logs
+├── docker-compose.yml    # Docker compose configuration
+├── Dockerfile           # Docker configuration
+├── requirements.txt     # Python dependencies
+└── README.md           
+```
