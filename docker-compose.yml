@@ -5,8 +5,8 @@ services:
       dockerfile: Dockerfile
     container_name: game_backend
     working_dir: /app
-    # run python directly to avoid Flask CLI issues
-    command: python backend/app.py
+    # start via flask CLI so FLASK_APP is respected
+    command: flask run --host=0.0.0.0 --port=8080
     ports:
       - "8080:8080"
     volumes:
@@ -25,7 +25,7 @@ services:
   mongodb:
     image: mongo:latest
     container_name: game_mongo
-    # map container's 27017 → host's 27018 to avoid conflict
+    # map container’s 27017 → host’s 27018 to avoid conflict
     ports:
       - "27018:27017"
     volumes:
