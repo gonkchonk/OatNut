@@ -1,33 +1,53 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Super Smash Clone</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Super Smash Clone</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body>
-    <div id="game-container">
-        <div id="login-section" class="section">
-            <h2>Login to Play</h2>
-            <form id="login-form">
-                <input type="text" id="username" placeholder="Username" required>
-                <input type="password" id="password" placeholder="Password" required>
-                <button type="submit">Login</button>
-            </form>
-            <p>New player? <a href="#" id="show-register">Register here</a></p>
-        </div>
-
-        <div id="game-section" class="section hidden">
-            <canvas id="game-canvas"></canvas>
-            <div id="player-info">
-                <span id="player-name"></span>
-                <span id="player-score">Score: 0</span>
-            </div>
-        </div>
+  <div id="game-container">
+    <!-- LOGIN -->
+    <div id="login-section" class="section">
+      <h2>Login to Play</h2>
+      <form id="login-form">
+        <input type="text" id="username" placeholder="Username" required />
+        <input type="password" id="password" placeholder="Password" required />
+        <button type="submit">Login</button>
+      </form>
+      <p>
+        New player?
+        <a href="#" id="show-register">Register here</a>
+      </p>
     </div>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-    <script src="{{ url_for('static', filename='js/game.js') }}"></script>
+    <!-- REGISTER -->
+    <div id="register-section" class="section hidden">
+      <h2>Create Account</h2>
+      <form id="register-form">
+        <input type="text"    id="reg-username" placeholder="Username" required />
+        <input type="email"   id="reg-email"    placeholder="Email"    required />
+        <input type="password" id="reg-password" placeholder="Password" required />
+        <button type="submit">Register</button>
+      </form>
+      <p>
+        Already have an account?
+        <a href="#" id="show-login">Login here</a>
+      </p>
+    </div>
+
+    <!-- GAME -->
+    <div id="game-section" class="section hidden">
+      <canvas id="game-canvas"></canvas>
+      <div id="player-info">
+        <span id="player-name"></span>
+        <span id="player-score">Score: 0</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+  <script src="{{ url_for('static', filename='js/game.js') }}"></script>
 </body>
-</html> 
+</html>
