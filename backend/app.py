@@ -1,10 +1,12 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 from flask_socketio import SocketIO
-from flask_login import LoginManager
+from flask_login import LoginManager, UserMixin
 from pymongo import MongoClient
+from bson.objectid import ObjectId
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+
 
 # Initialize Flask app
 app = Flask(__name__, 
@@ -26,6 +28,22 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
 
+class User(UserMixin):
+    def __init__(self, _id, username):
+        self.id = str(_id)
+        self.username = username
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(data["_id"], data["username"])
+    
+@login_manager.user_loader
+def load_user(user_id):
+    doc = db.users.find_one({"_id": ObjectId(user_id)})
+    if not doc:
+        return None
+    return User.from_dict(doc)
+
 # Set up logging
 if not os.path.exists('../logs'):
     os.makedirs('../logs')
@@ -38,6 +56,13 @@ file_handler.setLevel(logging.INFO)
 app.logger.addHandler(file_handler)
 app.logger.setLevel(logging.INFO)
 app.logger.info('Game startup')
+
+@app.before_request
+def log_request():
+    ip     = request.remote_addr or '-'
+    method = request.method
+    path   = request.path
+    app.logger.info(f"[{ip}] {method} {path}")
 
 @app.route('/')
 def index():
