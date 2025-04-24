@@ -79,4 +79,62 @@ button:hover {
 
 .hidden {
     display: none !important;
+}
+
+/* Lobby Styles */
+#lobby-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+#lobby-container header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+main {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2rem;
+}
+
+.create-room-section, .active-users-section, .rooms-section {
+    background-color: #2a2a2a;
+    padding: 1.5rem;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+}
+
+.room-card {
+    background-color: #3a3a3a;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+}
+
+.users-list {
+    list-style: none;
+    margin-top: 1rem;
+}
+
+.users-list li {
+    background-color: #3a3a3a;
+    padding: 0.5rem 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.users-list li.current-user {
+    background-color: #4CAF50;
+    font-weight: bold;
+}
+
+.no-users, .no-rooms, .loading {
+    color: #999;
+    font-style: italic;
 } 

@@ -72,6 +72,8 @@
                     });
                     
                     if (loginResponse.ok) {
+                        // Notify the server that the user has logged in
+                        socket.emit('user_login', { username });
                         window.location.href = '/lobby';
                     } else {
                         console.error('Auto-login after registration failed');
@@ -83,6 +85,8 @@
                     }
                 } else {
                     // Normal login flow
+                    // Notify the server that the user has logged in
+                    socket.emit('user_login', { username });
                     window.location.href = '/lobby';
                 }
             } else {

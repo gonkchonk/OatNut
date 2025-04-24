@@ -30,6 +30,13 @@
                 </form>
             </div>
 
+            <div class="active-users-section">
+                <h2>Online Players</h2>
+                <div id="active-users-list">
+                    <p class="loading">Loading online players...</p>
+                </div>
+            </div>
+
             <div class="rooms-section">
                 <h2>Available Rooms</h2>
                 <div id="rooms-list">
@@ -52,11 +59,55 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
         // Get username from localStorage
-        document.getElementById('lobby-username').textContent = localStorage.getItem('username');
+        const username = localStorage.getItem('username');
+        document.getElementById('lobby-username').textContent = username;
+
+        // Initialize Socket.IO
+        const socket = io();
+        
+        // Notify server about user login
+        socket.on('connect', () => {
+            socket.emit('user_login', { username });
+        });
+
+        // Function to update active users list
+        function updateActiveUsersList(users) {
+            const activeUsersList = document.getElementById('active-users-list');
+            if (!users || users.length === 0) {
+                activeUsersList.innerHTML = '<p class="no-users">No players online.</p>';
+                return;
+            }
+
+            let html = '<ul class="users-list">';
+            users.forEach(user => {
+                const isCurrentUser = user === username;
+                html += `<li class="${isCurrentUser ? 'current-user' : ''}">${user} ${isCurrentUser ? '(You)' : ''}</li>`;
+            });
+            html += '</ul>';
+            activeUsersList.innerHTML = html;
+        }
+
+        // Listen for active users updates
+        socket.on('active_users_update', (users) => {
+            updateActiveUsersList(users);
+        });
+
+        // Initialize active users list on page load
+        fetch('/api/active-users')
+            .then(response => response.json())
+            .then(data => {
+                updateActiveUsersList(data.users);
+            })
+            .catch(error => {
+                console.error('Error fetching active users:', error);
+            });
 
         // Logout functionality
         document.getElementById('logout-btn').addEventListener('click', async () => {
             try {
+                // Notify server about user logout
+                socket.emit('user_logout', { username });
+                
                 await fetch('/logout');
                 localStorage.removeItem('gameAuthToken');
                 localStorage.removeItem('username');
@@ -98,9 +149,6 @@
         function joinRoom(roomId) {
             window.location.href = `/join-room/${roomId}`;
         }
-
-        // Initialize Socket.IO
-        const socket = io();
 
         // Listen for room updates
         socket.on('room_update', (data) => {
