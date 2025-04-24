@@ -131,6 +131,51 @@ except Exception as e:
 
 # Track active users
 active_users = {}
+game_states = {}
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    room = data['room_id']
+    user = data['username']
+    join_room(room)
+
+    if room not in game_states:
+        game_states[room] = {'players': {}, 'active': True}
+
+    game_states[room]['players'][user] = {'x':0, 'y':0, 'score':0}
+    socketio.emit('game_state', game_states[room], room=room)
+
+
+@socketio.on('player_move')
+def handle_player_move(data):
+    room, user, pos = data['room_id'], data['username'], data['position']
+    state = game_states.get(room)
+    if not state or not state['active']: return
+
+    state['players'][user].update(pos)
+    socketio.emit('game_state', state, room=room)
+
+
+@socketio.on('player_attack')
+def handle_player_attack(data):
+    room, attacker = data['room_id'], data['username']
+    state = game_states.get(room)
+    if not state or not state['active']: return
+
+    state['players'][attacker]['score'] += 1
+
+    if state['players'][attacker]['score'] >= 5:
+        state['active'] = False
+        socketio.emit('game_over', {
+            'winner': attacker,
+            'finalScores': {
+                u: info['score']
+                for u, info in state['players'].items()
+            }
+        }, room=room)
+    else:
+        socketio.emit('game_state', state, room=room)
+
 
 # --- AUTHTOKEN SETUP ---
 user_tokens = db.user_authtokens
