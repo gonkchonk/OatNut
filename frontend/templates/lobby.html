@@ -62,13 +62,51 @@
         const username = localStorage.getItem('username');
         document.getElementById('lobby-username').textContent = username;
 
-        // Initialize Socket.IO
-        const socket = io();
+        // Initialize Socket.IO with reconnection options
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
         
-        // Notify server about user login
+        // Monitor socket connection status
+        window.socketStatus = {
+            connected: false,
+            lastEvent: null,
+            events: []
+        };
+        
         socket.on('connect', () => {
+            console.log('Socket connected!', socket.id);
+            window.socketStatus.connected = true;
+            window.socketStatus.lastEvent = 'connect';
+            window.socketStatus.events.push({event: 'connect', time: new Date()});
+            
+            // Notify server about user login
             socket.emit('user_login', { username });
         });
+        
+        socket.on('disconnect', () => {
+            console.log('Socket disconnected!');
+            window.socketStatus.connected = false;
+            window.socketStatus.lastEvent = 'disconnect';
+            window.socketStatus.events.push({event: 'disconnect', time: new Date()});
+        });
+        
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            window.socketStatus.lastEvent = 'connect_error';
+            window.socketStatus.events.push({event: 'connect_error', time: new Date(), error});
+        });
+        
+        // Expose a debug function
+        window.checkSocketStatus = () => {
+            console.log('Socket connected:', window.socketStatus.connected);
+            console.log('Socket ID:', socket.id);
+            console.log('Last event:', window.socketStatus.lastEvent);
+            console.log('Recent events:', window.socketStatus.events.slice(-5));
+            return window.socketStatus;
+        };
 
         // Function to update active users list
         function updateActiveUsersList(users) {
@@ -94,12 +132,75 @@
 
         // Initialize active users list on page load
         fetch('/api/active-users')
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch active users: ${response.status}`);
+                }
+                return response.json();
+            })
             .then(data => {
                 updateActiveUsersList(data.users);
             })
             .catch(error => {
                 console.error('Error fetching active users:', error);
+                // Show empty user list if there's an error
+                updateActiveUsersList([]);
+            });
+
+        // Function to update room list
+        function updateRoomsList(rooms) {
+            const roomsList = document.getElementById('rooms-list');
+            if (!rooms || rooms.length === 0) {
+                roomsList.innerHTML = '<p class="no-rooms">No rooms available. Create one to get started!</p>';
+                return;
+            }
+
+            let html = '';
+            rooms.forEach(room => {
+                html += `
+                <div class="room-card" data-room-id="${room._id}">
+                    <h3>${room.name}</h3>
+                    <p>Players: ${room.players.length}/${room.max_players}</p>
+                    <button class="join-btn" onclick="joinRoom('${room._id}')">Join Room</button>
+                </div>`;
+            });
+            roomsList.innerHTML = html;
+        }
+
+        // Listen for room updates
+        socket.on('room_update', () => {
+            // Fetch updated room list
+            fetch('/api/rooms')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateRoomsList(data.rooms);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching rooms:', error);
+                });
+        });
+
+        // Fetch rooms initially to ensure we have the latest data
+        fetch('/api/rooms')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch rooms: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    updateRoomsList(data.rooms);
+                } else {
+                    throw new Error(data.message || 'Failed to fetch rooms');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching rooms:', error);
+                // Show empty rooms list if there's an error
+                updateRoomsList([]);
             });
 
         // Logout functionality
@@ -108,12 +209,32 @@
                 // Notify server about user logout
                 socket.emit('user_logout', { username });
                 
-                await fetch('/logout');
+                // Get token from local storage
+                const token = localStorage.getItem('gameAuthToken');
+                
+                // Send logout request with token
+                const logoutResponse = await fetch('/logout', {
+                    method: 'GET',
+                    headers: token ? {
+                        'Authorization': `Bearer ${token}`
+                    } : {}
+                });
+                
+                // Clear local storage regardless of response
                 localStorage.removeItem('gameAuthToken');
                 localStorage.removeItem('username');
+                
+                console.log('Logged out successfully');
                 window.location.href = '/';
             } catch (error) {
                 console.error('Logout error:', error);
+                
+                // Clear storage even if there's an error
+                localStorage.removeItem('gameAuthToken');
+                localStorage.removeItem('username');
+                
+                // Redirect to home
+                window.location.href = '/';
             }
         });
 
@@ -147,33 +268,28 @@
 
         // Join room functionality
         function joinRoom(roomId) {
-            window.location.href = `/join-room/${roomId}`;
+            console.log(`Joining room: ${roomId}`);
+            
+            // Show loading state
+            const button = document.querySelector(`.room-card[data-room-id="${roomId}"] .join-btn`);
+            if (button) {
+                button.textContent = "Joining...";
+                button.disabled = true;
+            }
+            
+            try {
+                window.location.href = `/join-room/${roomId}`;
+            } catch (error) {
+                console.error('Error joining room:', error);
+                alert('Error joining room. Please try again.');
+                
+                // Reset button state
+                if (button) {
+                    button.textContent = "Join Room";
+                    button.disabled = false;
+                }
+            }
         }
-
-        // Listen for room updates
-        socket.on('room_update', () => {
-            // Fetch updated room list
-            fetch('/api/rooms')
-                .then(response => response.json())
-                .then(data => {
-                    const roomsList = document.getElementById('rooms-list');
-                    if (!data.rooms || data.rooms.length === 0) {
-                        roomsList.innerHTML = '<p class="no-rooms">No rooms available. Create one to get started!</p>';
-                        return;
-                    }
-
-                    roomsList.innerHTML = data.rooms.map(room => `
-                        <div class="room-card" data-room-id="${room._id}">
-                            <h3>${room.name}</h3>
-                            <p>Players: ${room.players.length}/${room.max_players}</p>
-                            <button class="join-btn" onclick="joinRoom('${room._id}')">Join Room</button>
-                        </div>
-                    `).join('');
-                })
-                .catch(error => {
-                    console.error('Error fetching rooms:', error);
-                });
-        });
     </script>
 </body>
 </html> 

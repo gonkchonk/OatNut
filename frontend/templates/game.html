@@ -4,84 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Game Room - Super Smash Clone</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 20px;
-            background-color: #1a1a1a;
-            color: white;
-            font-family: Arial, sans-serif;
-        }
-        
-        #game-container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
-        
-        .game-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        #game-canvas {
-            background-color: #333;
-            border: 2px solid #4CAF50;
-            margin-bottom: 20px;
-            display: block;
-        }
-        
-        #game-controls {
-            display: flex;
-            justify-content: space-between;
-            background-color: #2a2a2a;
-            padding: 20px;
-            border-radius: 8px;
-        }
-        
-        #players {
-            list-style: none;
-            padding: 0;
-            margin: 0;
-        }
-        
-        #players li {
-            padding: 8px;
-            margin: 4px 0;
-            background-color: #444;
-            border-radius: 4px;
-        }
-        
-        #players li.current-player {
-            background-color: #4CAF50;
-        }
-        
-        #leave-room-btn {
-            background-color: #f44336;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        
-        #score-display {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(0, 0, 0, 0.7);
-            padding: 5px 10px;
-            border-radius: 4px;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div id="game-container">
         <div class="game-header">
             <h2>{{ room.name }}</h2>
             <div>
-                <span>Players: <span id="player-count">0</span>/4</span>
+                <span>Players: <span id="player-count">{{ room.players|length }}/{{ room.max_players }}</span></span>
                 <button id="leave-room-btn">Leave Room</button>
             </div>
         </div>
@@ -94,18 +24,80 @@
         <div id="game-controls">
             <div class="controls-info">
                 <h3>Controls</h3>
-                <p>Use arrow keys to move</p>
+                <p>Arrow keys to move left/right</p>
                 <p>Space to jump</p>
-                <p>Z to attack</p>
+                <p>Z to attack nearby players</p>
+                <p>First to 5 points wins!</p>
             </div>
             <div class="player-list">
                 <h3>Players</h3>
-                <ul id="players"></ul>
+                <ul id="players">
+                    {% for player in room.players %}
+                    <li class="{% if player == current_user.username %}current-player{% endif %}">
+                        {{ player }}{% if player == current_user.username %} (You){% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
             </div>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // Store the room ID and current username for use in game.js
+        const roomId = "{{ room_id }}";
+        const currentUsername = localStorage.getItem('username');
+        
+        // Make sure user is logged in
+        if (!currentUsername) {
+            alert('You must be logged in to play');
+            window.location.href = '/';
+        }
+        
+        // Simple socket status monitoring
+        window.socketStatus = {
+            connected: false,
+            lastEvent: null,
+            events: []
+        };
+        
+        // Initialize socket connection before game.js loads
+        const socket = io({
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
+        
+        // Monitor socket connection
+        socket.on('connect', () => {
+            console.log('Socket connected!');
+            window.socketStatus.connected = true;
+            window.socketStatus.lastEvent = 'connect';
+            window.socketStatus.events.push({event: 'connect', time: new Date()});
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Socket disconnected!');
+            window.socketStatus.connected = false;
+            window.socketStatus.lastEvent = 'disconnect';
+            window.socketStatus.events.push({event: 'disconnect', time: new Date()});
+        });
+        
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            window.socketStatus.lastEvent = 'connect_error';
+            window.socketStatus.events.push({event: 'connect_error', time: new Date(), error});
+        });
+        
+        // Expose a debug function to check socket status
+        window.checkSocketStatus = () => {
+            console.log('Socket connected:', window.socketStatus.connected);
+            console.log('Socket ID:', socket.id);
+            console.log('Last event:', window.socketStatus.lastEvent);
+            console.log('Recent events:', window.socketStatus.events.slice(-5));
+            return window.socketStatus;
+        };
+    </script>
     <script src="{{ url_for('static', filename='js/game.js') }}"></script>
 </body>
 </html> 
