@@ -10,6 +10,7 @@ import hashlib
 import random
 import string
 import bcrypt
+import datetime
 
 # Initialize Flask app
 app = Flask(__name__, 
@@ -23,8 +24,15 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# Initialize SocketIO with cors_allowed_origins="*" to allow all origins
-socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
+# Initialize SocketIO
+socketio = SocketIO(
+    app, 
+    cors_allowed_origins="*",  # Allow all origins
+    logger=True,              # Enable logging
+    engineio_logger=True,     # Enable Engine.IO logging
+    ping_timeout=60,          # Increase ping timeout
+    ping_interval=25          # Increase ping interval
+)
 
 # Try to connect to MongoDB - if it fails we'll handle gracefully
 try:
@@ -148,32 +156,67 @@ def handle_join_room(data):
         room_id = data['room_id']
         username = data['username']
         app.logger.info(f"Player {username} joining room {room_id}")
+        
+        # Use flask_socketio's join_room to add the client to the room
         join_room(room_id)
+        
+        # Initialize room state if it doesn't exist
         if room_id not in game_states:
             game_states[room_id] = {
                 'players': {},
                 'active': True
             }
-        game_states[room_id]['players'][username] = {
-            'x': 400,
-            'y': 500,
-            'score': 0
-        }
+        
+        # Initialize player position
+        if username not in game_states[room_id]['players']:
+            # Spread players across the screen based on how many are in the room
+            player_count = len(game_states[room_id]['players'])
+            x_position = 100 + (player_count * 150)  # Space players out horizontally
+            
+            game_states[room_id]['players'][username] = {
+                'x': x_position,
+                'y': 500,  # Start at the bottom
+                'score': 0
+            }
+        
+        # Update player list in database
         db.rooms.update_one(
             {"_id": ObjectId(room_id)},
             {"$addToSet": {"players": username}}
         )
-        # Get max_players from DB
+        
+        # Get room details from database
         room = db.rooms.find_one({"_id": ObjectId(room_id)})
-        max_players = room['max_players'] if room and 'max_players' in room else 4
-        socketio.emit('game_state', {
+        max_players = room.get('max_players', 4) if room else 4
+        
+        # Broadcast the updated game state to all players in the room
+        room_data = {
             'players': game_states[room_id]['players'],
             'player_count': len(game_states[room_id]['players']),
-            'max_players': max_players
+            'max_players': max_players,
+            'room_name': room.get('name', 'Game Room') if room else 'Game Room'
+        }
+        
+        # Emit to the specific client first
+        emit('game_state', room_data)
+        
+        # Then emit to everyone in the room
+        socketio.emit('game_state', room_data, room=room_id)
+        
+        # Notify other players that someone has joined
+        socketio.emit('player_joined', {
+            'username': username,
+            'position': game_states[room_id]['players'][username],
+            'players': list(game_states[room_id]['players'].keys())
         }, room=room_id)
-        app.logger.info(f"Current game state: {game_states[room_id]}")
+        
+        # Also emit room_update to the lobby to refresh the room list
+        socketio.emit('room_update')
+        
+        app.logger.info(f"Current game state for room {room_id}: {game_states[room_id]}")
     except Exception as e:
-        app.logger.error(f"Error in handle_join_room: {str(e)}")
+        app.logger.error(f"Error in handle_join_room: {str(e)}", exc_info=True)
+        emit('error', {'message': f'Error joining room: {str(e)}'})
 
 @socketio.on('player_move')
 def handle_player_move(data):
@@ -181,11 +224,16 @@ def handle_player_move(data):
         room_id = data['room_id']
         username = data['username']
         position = data['position']
+        
         if room_id in game_states and username in game_states[room_id]['players']:
+            # Update player position
             game_states[room_id]['players'][username].update(position)
-            # Get max_players from DB
+            
+            # Get room details from database
             room = db.rooms.find_one({"_id": ObjectId(room_id)})
-            max_players = room['max_players'] if room and 'max_players' in room else 4
+            max_players = room.get('max_players', 4) if room else 4
+            
+            # Broadcast updated game state
             socketio.emit('game_state', {
                 'players': game_states[room_id]['players'],
                 'player_count': len(game_states[room_id]['players']),
@@ -196,24 +244,137 @@ def handle_player_move(data):
 
 @socketio.on('player_attack')
 def handle_player_attack(data):
-    room, attacker = data['room_id'], data['username']
-    state = game_states.get(room)
-    if not state or not state['active']: return
+    try:
+        room_id = data['room_id']
+        attacker = data['username']
+        target = data.get('target')  # Optional target
+        
+        # Check if room exists and is active
+        if room_id not in game_states or not game_states[room_id]['active']:
+            app.logger.warning(f"Attack failed: Room {room_id} not found or inactive")
+            return
+            
+        # Validate the attacker exists in the room
+        if attacker not in game_states[room_id]['players']:
+            app.logger.warning(f"Attack failed: Player {attacker} not in room {room_id}")
+            return
+            
+        # Validate target if specified
+        if target and target not in game_states[room_id]['players']:
+            app.logger.warning(f"Attack failed: Target {target} not in room {room_id}")
+            return
+            
+        # Increase the attacker's score
+        game_states[room_id]['players'][attacker]['score'] += 1
+        app.logger.info(f"Player {attacker} scored in room {room_id}. New score: {game_states[room_id]['players'][attacker]['score']}")
+        
+        # Check for win condition (score of 5)
+        if game_states[room_id]['players'][attacker]['score'] >= 5:
+            game_states[room_id]['active'] = False
+            app.logger.info(f"Game over in room {room_id}. Winner: {attacker}")
+            
+            socketio.emit('game_over', {
+                'winner': attacker,
+                'finalScores': {
+                    user: info['score']
+                    for user, info in game_states[room_id]['players'].items()
+                }
+            }, room=room_id)
+        else:
+            # Just update the game state
+            room = db.rooms.find_one({"_id": ObjectId(room_id)})
+            max_players = room.get('max_players', 4) if room else 4
+            
+            socketio.emit('game_state', {
+                'players': game_states[room_id]['players'],
+                'player_count': len(game_states[room_id]['players']),
+                'max_players': max_players
+            }, room=room_id)
+    except Exception as e:
+        app.logger.error(f"Error in handle_player_attack: {str(e)}", exc_info=True)
+        emit('error', {'message': f'Error processing attack: {str(e)}'})
 
-    state['players'][attacker]['score'] += 1
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    try:
+        room_id = data['room_id']
+        username = data['username']
+        app.logger.info(f"Player {username} leaving room {room_id}")
+        
+        # Remove player from game state
+        if room_id in game_states and username in game_states[room_id]['players']:
+            del game_states[room_id]['players'][username]
+            app.logger.info(f"Removed player {username} from game state in room {room_id}")
+            
+            # If room is empty, clean it up
+            if not game_states[room_id]['players']:
+                del game_states[room_id]
+                app.logger.info(f"Room {room_id} is empty, removing from game states")
+                
+                # Check if room exists in database before trying to delete
+                room = db.rooms.find_one({"_id": ObjectId(room_id)})
+                if room:
+                    db.rooms.delete_one({"_id": ObjectId(room_id)})
+                    app.logger.info(f"Deleted empty room {room_id} from database")
+            else:
+                # Get room details from database
+                room = db.rooms.find_one({"_id": ObjectId(room_id)})
+                if room:
+                    max_players = room.get('max_players', 4)
+                    
+                    # Update the database - remove player from room's players list
+                    db.rooms.update_one(
+                        {"_id": ObjectId(room_id)},
+                        {"$pull": {"players": username}}
+                    )
+                    app.logger.info(f"Removed player {username} from room {room_id} in database")
+                    
+                    # Broadcast updated game state
+                    socketio.emit('game_state', {
+                        'players': game_states[room_id]['players'],
+                        'player_count': len(game_states[room_id]['players']),
+                        'max_players': max_players
+                    }, room=room_id)
+                else:
+                    app.logger.warning(f"Room {room_id} not found in database")
+        else:
+            app.logger.warning(f"Player {username} or room {room_id} not found in game state")
+        
+        # Leave the socket room
+        leave_room(room_id)
+        app.logger.info(f"Player {username} left socket room {room_id}")
+        
+        # Notify others about the player leaving
+        remaining_players = list(game_states[room_id]['players'].keys()) if room_id in game_states else []
+        socketio.emit('player_left', {
+            'username': username,
+            'players': remaining_players
+        }, room=room_id)
+        
+        # Send a confirmation to the client that they've left
+        emit('left_room', {'success': True}, room=request.sid)
+        
+        # Broadcast room update to the lobby
+        socketio.emit('room_update')
+        
+        app.logger.info(f"Player {username} successfully left room {room_id}")
+    except Exception as e:
+        app.logger.error(f"Error in handle_leave_room: {str(e)}", exc_info=True)
+        emit('error', {'message': f'Error leaving room: {str(e)}'})
+        # Still try to send left_room to client
+        emit('left_room', {'success': False, 'error': str(e)}, room=request.sid)
 
-    if state['players'][attacker]['score'] >= 5:
-        state['active'] = False
-        socketio.emit('game_over', {
-            'winner': attacker,
-            'finalScores': {
-                u: info['score']
-                for u, info in state['players'].items()
-            }
-        }, room=room)
-    else:
-        socketio.emit('game_state', state, room=room)
-
+@app.route('/api/rooms')
+@login_required
+def get_rooms():
+    # Get all available game rooms
+    rooms = list(db.rooms.find({}, {"_id": 1, "name": 1, "players": 1, "max_players": 1}))
+    
+    # Convert ObjectId to string
+    for room in rooms:
+        room["_id"] = str(room["_id"])
+    
+    return jsonify({"success": True, "rooms": rooms})
 
 # --- AUTHTOKEN SETUP ---
 user_tokens = db.user_authtokens
@@ -222,22 +383,44 @@ user_tokens.create_index('userid')
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
-
 def create_authtoken(userid: str) -> str:
     token = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+    token_hash = _hash_token(token)
+    
+    # Check if a token already exists for this user and delete it
+    user_tokens.delete_many({'userid': userid})
+    
+    # Create new token
     user_tokens.insert_one({
-        'userid':    userid,
-        'authtoken': _hash_token(token)
+        'userid': userid,
+        'authtoken': token_hash
     })
+    
+    app.logger.info(f"Created new token for user ID: {userid}")
     return token
 
-
 def verify_authtoken(token: str) -> bool:
-    return user_tokens.find_one({'authtoken': _hash_token(token)}) is not None
+    if not token:
+        return False
+        
+    token_hash = _hash_token(token)
+    result = user_tokens.find_one({'authtoken': token_hash})
+    return result is not None
 
+def get_userid_from_token(token: str) -> str:
+    if not token:
+        return None
+        
+    token_hash = _hash_token(token)
+    result = user_tokens.find_one({'authtoken': token_hash})
+    return result['userid'] if result else None
 
 def delete_authtoken(token: str) -> None:
-    user_tokens.delete_one({'authtoken': _hash_token(token)})
+    if not token:
+        return
+        
+    token_hash = _hash_token(token)
+    user_tokens.delete_one({'authtoken': token_hash})
 # --- END AUTHTOKEN SETUP ---
 
 class User(UserMixin):
@@ -248,13 +431,21 @@ class User(UserMixin):
     @classmethod
     def from_dict(cls, data):
         return cls(data["_id"], data["username"])
+        
+    def __str__(self):
+        return f"User(id={self.id}, username={self.username})"
     
 @login_manager.user_loader
 def load_user(user_id):
-    doc = db.users.find_one({"_id": ObjectId(user_id)})
-    if not doc:
+    try:
+        doc = db.users.find_one({"_id": ObjectId(user_id)})
+        if not doc:
+            app.logger.warning(f"User not found for ID: {user_id}")
+            return None
+        return User.from_dict(doc)
+    except Exception as e:
+        app.logger.error(f"Error loading user: {str(e)}", exc_info=True)
         return None
-    return User.from_dict(doc)
 
 # Set up logging
 if not os.path.exists('logs'):
@@ -291,27 +482,45 @@ def index():
 
 @app.route('/register', methods=['POST'])
 def register():
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    
-    # Check if username exists
-    if db.users.find_one({"username": username}):
-        return jsonify({"success": False, "message": "Username already exists"}), 400
-    
-    # Hash the password
-    hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    
-    # Create user
-    user_id = db.users.insert_one({
-        "username": username,
-        "password": hashed_password
-    }).inserted_id
-    
-    # Generate auth token
-    token = create_authtoken(str(user_id))
-    
-    return jsonify({"success": True, "token": token, "username": username}), 201
+    try:
+        data = request.json
+        if not data:
+            app.logger.error("No JSON data in register request")
+            return jsonify({"success": False, "message": "Invalid request format"}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
+        
+        if not username or not password:
+            app.logger.error("Missing username or password in register request")
+            return jsonify({"success": False, "message": "Username and password are required"}), 400
+        
+        # Check if username exists
+        if db.users.find_one({"username": username}):
+            app.logger.warning(f"Registration failed: Username {username} already exists")
+            return jsonify({"success": False, "message": "Username already exists"}), 400
+        
+        # Hash the password
+        try:
+            hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        except Exception as e:
+            app.logger.error(f"Password hashing error: {str(e)}")
+            return jsonify({"success": False, "message": "Registration error"}), 500
+        
+        # Create user
+        user_id = db.users.insert_one({
+            "username": username,
+            "password": hashed_password
+        }).inserted_id
+        
+        # Generate auth token
+        token = create_authtoken(str(user_id))
+        
+        app.logger.info(f"User {username} registered successfully")
+        return jsonify({"success": True, "token": token, "username": username}), 201
+    except Exception as e:
+        app.logger.error(f"Registration error: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Registration failed, please try again"}), 500
 
 @socketio.on('connect')
 def handle_connect():
@@ -358,124 +567,205 @@ def get_active_users():
 def login():
     if request.method == 'GET':
         return render_template('index.html')
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    user_doc = db.users.find_one({"username": username})
-    if not user_doc:
-        return jsonify({"success": False, "message": "Invalid credentials"}), 401
-    if bcrypt.checkpw(password.encode('utf-8'), user_doc["password"]):
-        user = User.from_dict(user_doc)
-        login_user(user)
-        token = create_authtoken(str(user_doc["_id"]))
-        resp = jsonify({"success": True, "username": username})
-        resp.set_cookie('gameAuthToken', token, httponly=True, samesite='Lax')
-        return resp, 200
-    return jsonify({"success": False, "message": "Invalid credentials"}), 401
+    
+    try:
+        data = request.json
+        if not data:
+            app.logger.error("No JSON data in login request")
+            return jsonify({"success": False, "message": "Invalid request format"}), 400
+            
+        username = data.get('username')
+        password = data.get('password')
+        
+        if not username or not password:
+            app.logger.error("Missing username or password in login request")
+            return jsonify({"success": False, "message": "Username and password are required"}), 400
+        
+        app.logger.info(f"Login attempt for user: {username}")
+        
+        user_doc = db.users.find_one({"username": username})
+        if not user_doc:
+            app.logger.warning(f"Login failed: User {username} not found")
+            return jsonify({"success": False, "message": "Invalid credentials"}), 401
+        
+        try:
+            pw_check = bcrypt.checkpw(password.encode('utf-8'), user_doc["password"])
+        except Exception as e:
+            app.logger.error(f"Password check error: {str(e)}")
+            return jsonify({"success": False, "message": "Authentication error"}), 500
+            
+        if pw_check:
+            user = User.from_dict(user_doc)
+            login_user(user)
+            token = create_authtoken(str(user_doc["_id"]))
+            
+            app.logger.info(f"User {username} logged in successfully")
+            return jsonify({"success": True, "token": token, "username": username}), 200
+        else:
+            app.logger.warning(f"Login failed: Invalid password for user {username}")
+            return jsonify({"success": False, "message": "Invalid credentials"}), 401
+    except Exception as e:
+        app.logger.error(f"Login error: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Login failed, please try again"}), 500
 
 @app.route('/logout')
 @login_required
 def logout():
-    # User is already logged out by Flask-Login's logout_user
-    logout_user()
-    return jsonify({"success": True})
+    try:
+        username = current_user.username if current_user else None
+        app.logger.info(f"Logout request for user: {username}")
+        
+        # Get the auth token from the request headers
+        auth_header = request.headers.get('Authorization')
+        token = None
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove 'Bearer ' prefix
+        else:
+            # Try to get token from local storage via query param (fallback)
+            token = request.args.get('token')
+            
+        # If we have a token, delete it
+        if token:
+            delete_authtoken(token)
+            app.logger.info(f"Deleted auth token for user: {username}")
+        
+        # Logout the user with Flask-Login
+        logout_user()
+        app.logger.info(f"User {username} logged out successfully")
+        
+        return jsonify({"success": True, "message": "Logged out successfully"}), 200
+    except Exception as e:
+        app.logger.error(f"Logout error: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Logout failed"}), 500
 
 @app.route('/lobby')
 @login_required
 def lobby():
-    # Get all available game rooms
-    rooms = list(db.rooms.find({}, {"_id": 1, "name": 1, "players": 1, "max_players": 1}))
-    
-    # Convert ObjectId to string
-    for room in rooms:
-        room["_id"] = str(room["_id"])
-    
-    return render_template('lobby.html', rooms=rooms, username=current_user.username)
+    try:
+        app.logger.info(f"Lobby accessed by: {current_user.username}")
+        
+        # Get all available game rooms
+        rooms = list(db.rooms.find({}, {"_id": 1, "name": 1, "players": 1, "max_players": 1}))
+        
+        # Convert ObjectId to string
+        for room in rooms:
+            room["_id"] = str(room["_id"])
+        
+        return render_template('lobby.html', rooms=rooms, username=current_user.username)
+    except Exception as e:
+        app.logger.error(f"Error accessing lobby: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Error accessing lobby"}), 500
 
 @app.route('/create-room', methods=['POST'])
 @login_required
 def create_room():
-    data = request.json
-    room_name = data.get('name')
-    max_players = data.get('max_players', 4)
-    
-    room_id = db.rooms.insert_one({
-        "name": room_name,
-        "players": [current_user.username],
-        "max_players": max_players,
-        "creator": current_user.username
-    }).inserted_id
-    
-    return jsonify({"success": True, "room_id": str(room_id)})
+    try:
+        data = request.json
+        room_name = data.get('name')
+        max_players = data.get('max_players', 4)
+        
+        app.logger.info(f"Room creation by {current_user.username}: {room_name}")
+        
+        # Validate input
+        if not room_name:
+            return jsonify({"success": False, "message": "Room name is required"}), 400
+            
+        # Create room
+        room_id = db.rooms.insert_one({
+            "name": room_name,
+            "players": [current_user.username],
+            "max_players": max_players,
+            "creator": current_user.username,
+            "created_at": datetime.datetime.now()
+        }).inserted_id
+        
+        app.logger.info(f"Room created: {room_id}")
+        
+        # Emit room update event
+        socketio.emit('room_update')
+        
+        return jsonify({"success": True, "room_id": str(room_id)}), 201
+    except Exception as e:
+        app.logger.error(f"Error creating room: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": "Error creating room"}), 500
 
 @app.route('/join-room/<room_id>')
 @login_required
-def join_room(room_id):
-    room = db.rooms.find_one({"_id": ObjectId(room_id)})
-    if not room:
-        return jsonify({"success": False, "message": "Room not found"}), 404
-    
-    if len(room["players"]) >= room["max_players"]:
-        return jsonify({"success": False, "message": "Room is full"}), 400
-    
-    # Add player to room if not already in
-    if current_user.username not in room["players"]:
-        db.rooms.update_one(
-            {"_id": ObjectId(room_id)},
-            {"$push": {"players": current_user.username}}
-        )
-    
-    return render_template('game.html', room=room, room_id=room_id)
-
-@app.route('/api/rooms')
-@login_required
-def get_rooms():
-    # Get all available game rooms
-    rooms = list(db.rooms.find({}, {"_id": 1, "name": 1, "players": 1, "max_players": 1}))
-    
-    # Convert ObjectId to string
-    for room in rooms:
-        room["_id"] = str(room["_id"])
-    
-    return jsonify({"success": True, "rooms": rooms})
-
-@socketio.on('leave_room')
-def handle_leave_room(data):
+def join_room_route(room_id):
     try:
-        room_id = data['room_id']
-        username = data['username']
-        app.logger.info(f"Player {username} leaving room {room_id}")
-        # Remove player from game state
-        if room_id in game_states and username in game_states[room_id]['players']:
-            del game_states[room_id]['players'][username]
-            # If room is empty, clean it up
-            if not game_states[room_id]['players']:
-                del game_states[room_id]
-                # Also remove from database
-                db.rooms.delete_one({"_id": ObjectId(room_id)})
-            else:
-                # Get max_players from DB
-                room = db.rooms.find_one({"_id": ObjectId(room_id)})
-                max_players = room['max_players'] if room and 'max_players' in room else 4
-                socketio.emit('game_state', {
-                    'players': game_states[room_id]['players'],
-                    'player_count': len(game_states[room_id]['players']),
-                    'max_players': max_players
-                }, room=room_id)
-        # Leave the socket room
-        leave_room(room_id)
-        # Notify others about the player leaving
-        remaining_players = list(game_states[room_id]['players'].keys()) if room_id in game_states else []
-        socketio.emit('player_left', {
-            'username': username,
-            'players': remaining_players
-        }, room=room_id)
-        # Confirmation to the leaving client
-        emit('left_room', {}, room=request.sid)
-        app.logger.info(f"Player {username} successfully left room {room_id}")
+        room = db.rooms.find_one({"_id": ObjectId(room_id)})
+        if not room:
+            return jsonify({"success": False, "message": "Room not found"}), 404
+        
+        if len(room["players"]) >= room["max_players"]:
+            return jsonify({"success": False, "message": "Room is full"}), 400
+        
+        # Add player to room if not already in
+        if current_user.username not in room["players"]:
+            db.rooms.update_one(
+                {"_id": ObjectId(room_id)},
+                {"$addToSet": {"players": current_user.username}}
+            )
+            
+            # Re-fetch room to get updated players list
+            room = db.rooms.find_one({"_id": ObjectId(room_id)})
+        
+        # Send room_update event to refresh room lists in the lobby
+        socketio.emit('room_update')
+        
+        return render_template('game.html', room=room, room_id=room_id, current_user=current_user)
     except Exception as e:
-        app.logger.error(f"Error in handle_leave_room: {str(e)}")
-        emit('error', {'message': 'Error leaving room'})
+        app.logger.error(f"Error joining room: {str(e)}", exc_info=True)
+        return jsonify({"success": False, "message": f"Error joining room: {str(e)}"}), 500
+
+@app.route('/api/auth/check', methods=['GET'])
+def check_auth():
+    """Check if the current user is authenticated"""
+    try:
+        # Check login status from Flask-Login first
+        if current_user.is_authenticated:
+            return jsonify({
+                "success": True, 
+                "authenticated": True,
+                "username": current_user.username
+            }), 200
+        
+        # Check for auth token in headers or params
+        auth_header = request.headers.get('Authorization')
+        token = None
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:]  # Remove 'Bearer ' prefix
+        else:
+            # Try to get token from query param
+            token = request.args.get('token')
+        
+        if token and verify_authtoken(token):
+            # Get the user ID from the token
+            user_id = get_userid_from_token(token)
+            if user_id:
+                # Get the username from the user ID
+                user = db.users.find_one({"_id": ObjectId(user_id)})
+                if user:
+                    return jsonify({
+                        "success": True, 
+                        "authenticated": True,
+                        "username": user['username']
+                    }), 200
+        
+        # Not authenticated
+        return jsonify({
+            "success": True, 
+            "authenticated": False
+        }), 200
+    except Exception as e:
+        app.logger.error(f"Auth check error: {str(e)}", exc_info=True)
+        return jsonify({
+            "success": False, 
+            "authenticated": False,
+            "message": "Error checking authentication status"
+        }), 500
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=8080, debug=True)
