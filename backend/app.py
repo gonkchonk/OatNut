@@ -1,9 +1,5 @@
-import eventlet
-# Monkey patch standard library with eventlet's cooperative versions
-eventlet.monkey_patch()
-
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from pymongo import MongoClient
 from bson.objectid import ObjectId
@@ -22,8 +18,13 @@ app = Flask(__name__,
 )
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev_key_123')  # Change in production
 
-# Initialize SocketIO with eventlet
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+# Initialize LoginManager
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# Initialize SocketIO with cors_allowed_origins="*" to allow all origins
+socketio = SocketIO(app, cors_allowed_origins="*", logger=True, engineio_logger=True)
 
 # Try to connect to MongoDB - if it fails we'll handle gracefully
 try:
@@ -133,28 +134,72 @@ except Exception as e:
 active_users = {}
 game_states = {}
 
+@socketio.on('connect')
+def handle_connect():
+    app.logger.info(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    app.logger.info(f"Client disconnected: {request.sid}")
+
 @socketio.on('join_room')
 def handle_join_room(data):
-    room = data['room_id']
-    user = data['username']
-    join_room(room)
-
-    if room not in game_states:
-        game_states[room] = {'players': {}, 'active': True}
-
-    game_states[room]['players'][user] = {'x':0, 'y':0, 'score':0}
-    socketio.emit('game_state', game_states[room], room=room)
-
+    try:
+        room_id = data['room_id']
+        username = data['username']
+        
+        app.logger.info(f"Player {username} joining room {room_id}")
+        
+        # Join the socket room
+        join_room(room_id)
+        
+        # Initialize game state for the room if it doesn't exist
+        if room_id not in game_states:
+            game_states[room_id] = {
+                'players': {},
+                'active': True
+            }
+        
+        # Add player to game state
+        game_states[room_id]['players'][username] = {
+            'x': 400,
+            'y': 500,
+            'score': 0
+        }
+        
+        # Update room in database
+        db.rooms.update_one(
+            {"_id": ObjectId(room_id)},
+            {"$addToSet": {"players": username}}
+        )
+        
+        # Emit game state to all players in the room
+        socketio.emit('game_state', {
+            'players': game_states[room_id]['players']
+        }, room=room_id)
+        
+        app.logger.info(f"Current game state: {game_states[room_id]}")
+        
+    except Exception as e:
+        app.logger.error(f"Error in handle_join_room: {str(e)}")
 
 @socketio.on('player_move')
 def handle_player_move(data):
-    room, user, pos = data['room_id'], data['username'], data['position']
-    state = game_states.get(room)
-    if not state or not state['active']: return
-
-    state['players'][user].update(pos)
-    socketio.emit('game_state', state, room=room)
-
+    try:
+        room_id = data['room_id']
+        username = data['username']
+        position = data['position']
+        
+        if room_id in game_states and username in game_states[room_id]['players']:
+            # Update player position
+            game_states[room_id]['players'][username].update(position)
+            # Broadcast updated game state to all players in the room
+            socketio.emit('game_state', {
+                'players': game_states[room_id]['players']
+            }, room=room_id)
+            
+    except Exception as e:
+        app.logger.error(f"Error in handle_player_move: {str(e)}")
 
 @socketio.on('player_attack')
 def handle_player_attack(data):
@@ -202,11 +247,6 @@ def delete_authtoken(token: str) -> None:
     user_tokens.delete_one({'authtoken': _hash_token(token)})
 # --- END AUTHTOKEN SETUP ---
 
-# Initialize Login Manager
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
-
 class User(UserMixin):
     def __init__(self, _id, username):
         self.id = str(_id)
@@ -224,18 +264,18 @@ def load_user(user_id):
     return User.from_dict(doc)
 
 # Set up logging
-if not os.path.exists('../logs'):
-    os.makedirs('../logs')
+if not os.path.exists('logs'):
+    os.makedirs('logs')
 
 try:
-    file_handler = RotatingFileHandler('../logs/game.log', maxBytes=10240, backupCount=10)
+    file_handler = RotatingFileHandler('logs/app.log', maxBytes=10240, backupCount=10)
     file_handler.setFormatter(logging.Formatter(
         '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
     ))
     file_handler.setLevel(logging.INFO)
     app.logger.addHandler(file_handler)
     app.logger.setLevel(logging.INFO)
-    app.logger.info('Game startup')
+    app.logger.info('Application startup')
 except Exception as e:
     print(f"Error setting up logging: {e}")
     # Set up simple console logging instead
@@ -405,11 +445,54 @@ def join_room(room_id):
     
     return render_template('game.html', room=room, room_id=room_id)
 
+@app.route('/api/rooms')
+@login_required
+def get_rooms():
+    # Get all available game rooms
+    rooms = list(db.rooms.find({}, {"_id": 1, "name": 1, "players": 1, "max_players": 1}))
+    
+    # Convert ObjectId to string
+    for room in rooms:
+        room["_id"] = str(room["_id"])
+    
+    return jsonify({"success": True, "rooms": rooms})
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    try:
+        room_id = data['room_id']
+        username = data['username']
+        
+        app.logger.info(f"Player {username} leaving room {room_id}")
+        
+        # Remove player from game state
+        if room_id in game_states and username in game_states[room_id]['players']:
+            del game_states[room_id]['players'][username]
+            
+            # If room is empty, clean it up
+            if not game_states[room_id]['players']:
+                del game_states[room_id]
+                # Also remove from database
+                db.rooms.delete_one({"_id": ObjectId(room_id)})
+            else:
+                # Broadcast updated game state to remaining players
+                socketio.emit('game_state', game_states[room_id], room=room_id)
+        
+        # Leave the socket room
+        leave_room(room_id)
+        
+        # Notify others about the player leaving
+        remaining_players = list(game_states[room_id]['players'].keys()) if room_id in game_states else []
+        socketio.emit('player_left', {
+            'username': username,
+            'players': remaining_players
+        }, room=room_id)
+        
+        app.logger.info(f"Player {username} successfully left room {room_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error in handle_leave_room: {str(e)}")
+        emit('error', {'message': 'Error leaving room'})
+
 if __name__ == '__main__':
-    import eventlet.wsgi
-    app.logger.info("Starting server with eventlet")
-    # Create a new eventlet WSGI server
-    eventlet_socket = eventlet.listen(('0.0.0.0', 8080))
-    eventlet.wsgi.server(eventlet_socket, app)
-    # We don't use socketio.run() as it might not be best for production
-    # socketio.run(app, host='0.0.0.0', port=8080, debug=True)
+    socketio.run(app, host='0.0.0.0', port=8080, debug=True)

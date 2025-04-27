@@ -151,9 +151,28 @@
         }
 
         // Listen for room updates
-        socket.on('room_update', (data) => {
-            // Refresh the page to show updated room list
-            window.location.reload();
+        socket.on('room_update', () => {
+            // Fetch updated room list
+            fetch('/api/rooms')
+                .then(response => response.json())
+                .then(data => {
+                    const roomsList = document.getElementById('rooms-list');
+                    if (!data.rooms || data.rooms.length === 0) {
+                        roomsList.innerHTML = '<p class="no-rooms">No rooms available. Create one to get started!</p>';
+                        return;
+                    }
+
+                    roomsList.innerHTML = data.rooms.map(room => `
+                        <div class="room-card" data-room-id="${room._id}">
+                            <h3>${room.name}</h3>
+                            <p>Players: ${room.players.length}/${room.max_players}</p>
+                            <button class="join-btn" onclick="joinRoom('${room._id}')">Join Room</button>
+                        </div>
+                    `).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching rooms:', error);
+                });
         });
     </script>
 </body>

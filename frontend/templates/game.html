@@ -4,24 +4,91 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Game Room - Super Smash Clone</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+        }
+        
+        #game-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        #game-canvas {
+            background-color: #333;
+            border: 2px solid #4CAF50;
+            margin-bottom: 20px;
+            display: block;
+        }
+        
+        #game-controls {
+            display: flex;
+            justify-content: space-between;
+            background-color: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+        }
+        
+        #players {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        #players li {
+            padding: 8px;
+            margin: 4px 0;
+            background-color: #444;
+            border-radius: 4px;
+        }
+        
+        #players li.current-player {
+            background-color: #4CAF50;
+        }
+        
+        #leave-room-btn {
+            background-color: #f44336;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        #score-display {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+    </style>
 </head>
 <body>
     <div id="game-container">
-        <header class="game-header">
-            <h2 class="room-name">{{ room.name }}</h2>
-            <div class="room-info">
-                <span>Players: {{ room.players|length }}/{{ room.max_players }}</span>
+        <div class="game-header">
+            <h2>{{ room.name }}</h2>
+            <div>
+                <span>Players: <span id="player-count">0</span>/4</span>
                 <button id="leave-room-btn">Leave Room</button>
             </div>
-        </header>
+        </div>
 
-        <div id="game-section">
-            <canvas id="game-canvas"></canvas>
-            <div id="player-info">
-                <span id="player-name"></span>
-                <span id="player-score">Score: 0</span>
-            </div>
+        <div id="game-section" style="position: relative;">
+            <canvas id="game-canvas" width="800" height="600"></canvas>
+            <div id="score-display">Score: <span id="player-score">0</span></div>
         </div>
 
         <div id="game-controls">
@@ -33,180 +100,193 @@
             </div>
             <div class="player-list">
                 <h3>Players</h3>
-                <ul id="players">
-                    {% for player in room.players %}
-                    <li>{{ player }}</li>
-                    {% endfor %}
-                </ul>
+                <ul id="players"></ul>
             </div>
         </div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
-        // Store room ID and current user
-        const roomId = '{{ room_id }}';
+        const roomId = '{{ room._id }}';
         const currentUsername = localStorage.getItem('username');
-        document.getElementById('player-name').textContent = currentUsername;
-
-        // Initialize Socket.IO
         const socket = io();
-
-        // Game canvas setup
         const canvas = document.getElementById('game-canvas');
         const ctx = canvas.getContext('2d');
+        
+        // Set fixed canvas size
+        canvas.width = 800;
+        canvas.height = 600;
 
-        // Resize canvas
-        function resizeCanvas() {
-            canvas.width = document.getElementById('game-section').clientWidth;
-            canvas.height = document.getElementById('game-section').clientHeight;
-            updateGame();
-        }
-
-        window.addEventListener('resize', resizeCanvas);
-        resizeCanvas();
-
-        // Game state
+        // Initialize game state with current player
         let gameState = {
-            players: {},
-            currentPlayer: currentUsername
+            players: {
+                [currentUsername]: {
+                    x: 400,
+                    y: 500,
+                    score: 0
+                }
+            }
         };
 
-        // Join the room
-        socket.emit('join_room', { 
-            room_id: roomId, 
-            username: currentUsername 
-        });
+        // Debug logging
+        console.log('Game initialized for user:', currentUsername);
 
-        // Leave room button
-        document.getElementById('leave-room-btn').addEventListener('click', () => {
-            socket.emit('leave_room', { 
-                room_id: roomId, 
-                username: currentUsername 
+        // Socket connection handling
+        socket.on('connect', () => {
+            console.log('Connected to WebSocket server');
+            socket.emit('join_room', {
+                room_id: roomId,
+                username: currentUsername
             });
-            window.location.href = '/lobby';
         });
 
-        // Socket event handlers
-        socket.on('player_joined', (data) => {
-            console.log(`${data.username} joined the game`);
-            gameState.players[data.username] = data.position;
-            updatePlayersList(data.players);
+        // Handle initial state when joining
+        socket.on('initial_state', (data) => {
+            console.log('Received initial state:', data);
+            gameState.players = data.all_players;
+            
+            // Update player count
+            document.getElementById('player-count').textContent = 
+                `${data.player_count}/${data.max_players}`;
+            
+            // Update player list
+            updatePlayersList(Object.keys(data.all_players));
+            
+            // Update game display
             updateGame();
         });
 
-        socket.on('player_left', (data) => {
-            console.log(`${data.username} left the game`);
-            delete gameState.players[data.username];
-            updatePlayersList(data.players);
-            updateGame();
-        });
-
+        // Handle game state updates
         socket.on('game_state', (state) => {
+            console.log('Received game state update:', state);
             gameState.players = state.players;
+            
+            // Update player count
+            document.getElementById('player-count').textContent = 
+                `${state.player_count}/${state.max_players}`;
+            
+            // Update player list
+            updatePlayersList(Object.keys(state.players));
+            
+            // Update game display
             updateGame();
         });
 
         function updatePlayersList(players) {
+            console.log('Updating players list:', players);
             const playersList = document.getElementById('players');
-            playersList.innerHTML = '';
-            
-            players.forEach(player => {
-                const li = document.createElement('li');
-                li.textContent = player;
-                if (player === currentUsername) {
-                    li.classList.add('current-player');
-                }
-                playersList.appendChild(li);
-            });
+            playersList.innerHTML = players.map(player => 
+                `<li class="${player === currentUsername ? 'current-player' : ''}">${player}${player === currentUsername ? ' (You)' : ''}</li>`
+            ).join('');
         }
 
-        // Game loop
         function updateGame() {
             // Clear canvas
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            
+
             // Draw platform
-            ctx.fillStyle = '#333';
+            ctx.fillStyle = '#666';
             ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
-            
+
             // Draw all players
-            Object.entries(gameState.players).forEach(([username, position]) => {
-                drawPlayer(position.x, position.y, username === gameState.currentPlayer);
+            Object.entries(gameState.players).forEach(([username, player]) => {
+                // Draw player circle
+                ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
+                ctx.beginPath();
+                ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw username and score
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${username} (${player.score || 0})`, player.x, player.y - 35);
             });
         }
 
-        function drawPlayer(x, y, isCurrentPlayer) {
-            ctx.fillStyle = isCurrentPlayer ? '#4CAF50' : '#ff4444';
-            ctx.fillRect(x, y, 50, 50);
-        }
-
-        // Keyboard controls
+        // Input handling
         const keys = {};
         window.addEventListener('keydown', (e) => {
             keys[e.code] = true;
-            handleInput();
+            if(e.code === 'Space') {
+                e.preventDefault();
+            }
         });
-
-        window.addEventListener('keyup', (e) => {
-            keys[e.code] = false;
-        });
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
 
         function handleInput() {
-            // If player doesn't exist in game state yet, initialize
-            if (!gameState.players[currentUsername]) {
-                gameState.players[currentUsername] = {
-                    x: Math.random() * (canvas.width - 100) + 50,
-                    y: 0
-                };
-            }
+            if (!gameState.players[currentUsername]) return;
 
             const player = gameState.players[currentUsername];
             let moved = false;
 
-            if (keys['ArrowLeft']) {
+            if (keys['ArrowLeft'] && player.x > 25) {
                 player.x -= 5;
                 moved = true;
             }
-            if (keys['ArrowRight']) {
+            if (keys['ArrowRight'] && player.x < canvas.width - 25) {
                 player.x += 5;
                 moved = true;
             }
-            if (keys['Space'] && player.y === canvas.height - 100) {
-                // Simple jump logic
-                player.y -= 100;
+            if (keys['Space'] && player.y >= canvas.height - 100) {
+                player.y -= 200;
                 moved = true;
             }
 
-            // Update position
             if (moved) {
                 socket.emit('player_move', {
                     room_id: roomId,
                     username: currentUsername,
-                    position: player
+                    position: {
+                        x: player.x,
+                        y: player.y,
+                        score: player.score || 0
+                    }
                 });
-                updateGame();
             }
         }
 
-        // Gravity simulation
-        function applyGravity() {
+        // Apply gravity
+        setInterval(() => {
             if (gameState.players[currentUsername]) {
                 const player = gameState.players[currentUsername];
-                if (player.y < canvas.height - 100) { // Not on platform
-                    player.y += 5;
+                if (player.y < canvas.height - 100) {
+                    player.y = Math.min(player.y + 5, canvas.height - 100);
+                    
                     socket.emit('player_move', {
                         room_id: roomId,
                         username: currentUsername,
-                        position: player
+                        position: {
+                            x: player.x,
+                            y: player.y,
+                            score: player.score || 0
+                        }
                     });
-                    updateGame();
                 }
             }
+        }, 20);
+
+        // Game loop
+        function gameLoop() {
+            handleInput();
+            updateGame();
+            requestAnimationFrame(gameLoop);
         }
 
-        // Start gravity loop
-        setInterval(applyGravity, 100);
+        // Start the game loop
+        gameLoop();
+
+        // Leave room button handler
+        document.getElementById('leave-room-btn').addEventListener('click', () => {
+            socket.emit('leave_room', {
+                room_id: roomId,
+                username: currentUsername
+            });
+            window.location.href = '/lobby';
+        });
+
+        // Initial render
+        updateGame();
     </script>
 </body>
 </html> 
