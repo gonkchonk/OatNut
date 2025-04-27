@@ -11,6 +11,8 @@ import random
 import string
 import bcrypt
 import datetime
+import time
+import math
 
 # Initialize Flask app
 app = Flask(__name__, 
@@ -176,7 +178,11 @@ def handle_join_room(data):
             game_states[room_id]['players'][username] = {
                 'x': x_position,
                 'y': 500,  # Start at the bottom
-                'score': 0
+                'score': 0,
+                'lives': 3,  # Each player starts with 3 lives
+                'health': 100,
+                'invulnerable': False,
+                'invulnerable_until': 0
             }
         
         # Update player list in database
@@ -246,50 +252,120 @@ def handle_player_move(data):
 def handle_player_attack(data):
     try:
         room_id = data['room_id']
-        attacker = data['username']
-        target = data.get('target')  # Optional target
+        username = data['username']
+        target = data['target']
+        current_time = time.time()
         
-        # Check if room exists and is active
-        if room_id not in game_states or not game_states[room_id]['active']:
-            app.logger.warning(f"Attack failed: Room {room_id} not found or inactive")
+        if room_id not in game_states:
             return
             
-        # Validate the attacker exists in the room
-        if attacker not in game_states[room_id]['players']:
-            app.logger.warning(f"Attack failed: Player {attacker} not in room {room_id}")
+        if target not in game_states[room_id]['players']:
             return
             
-        # Validate target if specified
-        if target and target not in game_states[room_id]['players']:
-            app.logger.warning(f"Attack failed: Target {target} not in room {room_id}")
-            return
-            
-        # Increase the attacker's score
-        game_states[room_id]['players'][attacker]['score'] += 1
-        app.logger.info(f"Player {attacker} scored in room {room_id}. New score: {game_states[room_id]['players'][attacker]['score']}")
+        target_player = game_states[room_id]['players'][target]
+        attacker = game_states[room_id]['players'][username]
         
-        # Check for win condition (score of 5)
-        if game_states[room_id]['players'][attacker]['score'] >= 5:
-            game_states[room_id]['active'] = False
-            app.logger.info(f"Game over in room {room_id}. Winner: {attacker}")
+        # Don't allow attacking if either player is dead or eliminated
+        if target_player.get('dead') or attacker.get('dead') or target_player.get('eliminated') or attacker.get('eliminated'):
+            return
             
-            socketio.emit('game_over', {
-                'winner': attacker,
-                'finalScores': {
-                    user: info['score']
-                    for user, info in game_states[room_id]['players'].items()
-                }
-            }, room=room_id)
-        else:
-            # Just update the game state
-            room = db.rooms.find_one({"_id": ObjectId(room_id)})
-            max_players = room.get('max_players', 4) if room else 4
+        # Don't allow attacking invulnerable players
+        if target_player.get('invulnerable') and current_time < target_player.get('invulnerable_until', 0):
+            return
             
-            socketio.emit('game_state', {
-                'players': game_states[room_id]['players'],
-                'player_count': len(game_states[room_id]['players']),
-                'max_players': max_players
+        # Calculate distance between players
+        distance = math.sqrt(
+            (target_player['x'] - attacker['x']) ** 2 +
+            (target_player['y'] - attacker['y']) ** 2
+        )
+        
+        # Only allow attack if players are close enough (within 100 pixels)
+        if distance <= 100:
+            # Reduce target's health by 20
+            target_player['health'] = max(0, target_player['health'] - 20)
+            
+            # Emit health update to all players
+            socketio.emit('player_health_update', {
+                'username': target,
+                'health': target_player['health']
             }, room=room_id)
+            
+            # Check if target is defeated
+            if target_player['health'] <= 0:
+                # Reduce target's lives
+                target_player['lives'] -= 1
+                
+                # Set player as dead and start respawn timer if they have lives left
+                target_player['dead'] = True
+                target_player['respawn_time'] = current_time + 3  # 3 second respawn timer
+                
+                # Emit death state and remaining lives to all players
+                socketio.emit('player_died', {
+                    'username': target,
+                    'respawn_time': target_player['respawn_time'],
+                    'lives_remaining': target_player['lives']
+                }, room=room_id)
+                
+                # Check if player is eliminated (no lives left)
+                if target_player['lives'] <= 0:
+                    target_player['eliminated'] = True
+                    socketio.emit('player_eliminated', {
+                        'username': target
+                    }, room=room_id)
+                    
+                    # Count remaining players with lives
+                    players_alive = sum(1 for p in game_states[room_id]['players'].values() 
+                                     if not p.get('eliminated', False) and p.get('lives', 0) > 0)
+                    
+                    # If only one player remains, they win
+                    if players_alive == 1:
+                        winner = next(username for username, p in game_states[room_id]['players'].items() 
+                                   if not p.get('eliminated', False) and p.get('lives', 0) > 0)
+                        
+                        socketio.emit('game_over', {
+                            'winner': winner,
+                            'finalLives': {player: p['lives'] for player, p in game_states[room_id]['players'].items()}
+                        }, room=room_id)
+                        
+                        # Reset game state
+                        for player in game_states[room_id]['players'].values():
+                            player['lives'] = 3
+                            player['health'] = 100
+                            player['eliminated'] = False
+                            player['dead'] = False
+                            player['invulnerable'] = False
+                            player['invulnerable_until'] = 0
+                        
+                        socketio.emit('game_state', {
+                            'players': game_states[room_id]['players']
+                        }, room=room_id)
+                else:
+                    # Schedule respawn if player has lives remaining
+                    def respawn_player():
+                        if room_id in game_states and target in game_states[room_id]['players']:
+                            target_player = game_states[room_id]['players'][target]
+                            # Reset health and make invulnerable
+                            target_player['dead'] = False
+                            target_player['health'] = 100
+                            target_player['invulnerable'] = True
+                            target_player['invulnerable_until'] = current_time + 6  # 6 seconds invulnerability after respawn
+                            
+                            # Emit respawn state
+                            socketio.emit('player_respawned', {
+                                'username': target,
+                                'invulnerable_until': target_player['invulnerable_until'],
+                                'lives_remaining': target_player['lives']
+                            }, room=room_id)
+                            
+                            # Emit updated game state
+                            socketio.emit('game_state', {
+                                'players': game_states[room_id]['players']
+                            }, room=room_id)
+                    
+                    # Schedule the respawn
+                    socketio.sleep(3)
+                    respawn_player()
+    
     except Exception as e:
         app.logger.error(f"Error in handle_player_attack: {str(e)}", exc_info=True)
         emit('error', {'message': f'Error processing attack: {str(e)}'})
