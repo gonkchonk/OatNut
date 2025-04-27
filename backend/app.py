@@ -147,39 +147,31 @@ def handle_join_room(data):
     try:
         room_id = data['room_id']
         username = data['username']
-        
         app.logger.info(f"Player {username} joining room {room_id}")
-        
-        # Join the socket room
         join_room(room_id)
-        
-        # Initialize game state for the room if it doesn't exist
         if room_id not in game_states:
             game_states[room_id] = {
                 'players': {},
                 'active': True
             }
-        
-        # Add player to game state
         game_states[room_id]['players'][username] = {
             'x': 400,
             'y': 500,
             'score': 0
         }
-        
-        # Update room in database
         db.rooms.update_one(
             {"_id": ObjectId(room_id)},
             {"$addToSet": {"players": username}}
         )
-        
-        # Emit game state to all players in the room
+        # Get max_players from DB
+        room = db.rooms.find_one({"_id": ObjectId(room_id)})
+        max_players = room['max_players'] if room and 'max_players' in room else 4
         socketio.emit('game_state', {
-            'players': game_states[room_id]['players']
+            'players': game_states[room_id]['players'],
+            'player_count': len(game_states[room_id]['players']),
+            'max_players': max_players
         }, room=room_id)
-        
         app.logger.info(f"Current game state: {game_states[room_id]}")
-        
     except Exception as e:
         app.logger.error(f"Error in handle_join_room: {str(e)}")
 
@@ -189,15 +181,16 @@ def handle_player_move(data):
         room_id = data['room_id']
         username = data['username']
         position = data['position']
-        
         if room_id in game_states and username in game_states[room_id]['players']:
-            # Update player position
             game_states[room_id]['players'][username].update(position)
-            # Broadcast updated game state to all players in the room
+            # Get max_players from DB
+            room = db.rooms.find_one({"_id": ObjectId(room_id)})
+            max_players = room['max_players'] if room and 'max_players' in room else 4
             socketio.emit('game_state', {
-                'players': game_states[room_id]['players']
+                'players': game_states[room_id]['players'],
+                'player_count': len(game_states[room_id]['players']),
+                'max_players': max_players
             }, room=room_id)
-            
     except Exception as e:
         app.logger.error(f"Error in handle_player_move: {str(e)}")
 
@@ -364,31 +357,20 @@ def get_active_users():
 @app.route('/login', methods=['POST', 'GET'])
 def login():
     if request.method == 'GET':
-        # For redirects from @login_required, just render the index page
         return render_template('index.html')
-    
     data = request.json
     username = data.get('username')
     password = data.get('password')
-    
-    # Find user
     user_doc = db.users.find_one({"username": username})
     if not user_doc:
         return jsonify({"success": False, "message": "Invalid credentials"}), 401
-    
-    # Check password
     if bcrypt.checkpw(password.encode('utf-8'), user_doc["password"]):
-        # Create user object
         user = User.from_dict(user_doc)
-        
-        # Login user
         login_user(user)
-        
-        # Generate auth token
         token = create_authtoken(str(user_doc["_id"]))
-        
-        return jsonify({"success": True, "token": token, "username": username}), 200
-    
+        resp = jsonify({"success": True, "username": username})
+        resp.set_cookie('gameAuthToken', token, httponly=True, samesite='Lax')
+        return resp, 200
     return jsonify({"success": False, "message": "Invalid credentials"}), 401
 
 @app.route('/logout')
@@ -462,34 +444,35 @@ def handle_leave_room(data):
     try:
         room_id = data['room_id']
         username = data['username']
-        
         app.logger.info(f"Player {username} leaving room {room_id}")
-        
         # Remove player from game state
         if room_id in game_states and username in game_states[room_id]['players']:
             del game_states[room_id]['players'][username]
-            
             # If room is empty, clean it up
             if not game_states[room_id]['players']:
                 del game_states[room_id]
                 # Also remove from database
                 db.rooms.delete_one({"_id": ObjectId(room_id)})
             else:
-                # Broadcast updated game state to remaining players
-                socketio.emit('game_state', game_states[room_id], room=room_id)
-        
+                # Get max_players from DB
+                room = db.rooms.find_one({"_id": ObjectId(room_id)})
+                max_players = room['max_players'] if room and 'max_players' in room else 4
+                socketio.emit('game_state', {
+                    'players': game_states[room_id]['players'],
+                    'player_count': len(game_states[room_id]['players']),
+                    'max_players': max_players
+                }, room=room_id)
         # Leave the socket room
         leave_room(room_id)
-        
         # Notify others about the player leaving
         remaining_players = list(game_states[room_id]['players'].keys()) if room_id in game_states else []
         socketio.emit('player_left', {
             'username': username,
             'players': remaining_players
         }, room=room_id)
-        
+        # Confirmation to the leaving client
+        emit('left_room', {}, room=request.sid)
         app.logger.info(f"Player {username} successfully left room {room_id}")
-        
     except Exception as e:
         app.logger.error(f"Error in handle_leave_room: {str(e)}")
         emit('error', {'message': 'Error leaving room'})

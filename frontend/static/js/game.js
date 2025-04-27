@@ -56,7 +56,6 @@ loginForm.addEventListener('submit', async (e) => {
         
         if (response.ok) {
             // Store token in local storage
-            localStorage.setItem('gameAuthToken', data.token);
             localStorage.setItem('username', data.username);
             
             // If this was a registration, now log in automatically
@@ -128,6 +127,15 @@ socket.on('player_left', (data) => {
     console.log(`${data.username} left the game`);
     delete gameState.players[data.username];
     updateGame();
+    if (playerCountElem) {
+        playerCountElem.textContent = `${data.players.length}/${gameState.max_players || 4}`;
+    }
+    if (playersListElem) {
+        playersListElem.innerHTML = data.players.map(player =>
+            `<li class="${player === currentUsername ? 'current-player' : ''}">${player}${player === currentUsername ? ' (You)' : ''}</li>`
+        ).join('');
+    }
+    updateGame();
 });
 
 socket.on('game_state', (state) => {
@@ -171,7 +179,7 @@ function drawPlayer(x, y, isCurrentPlayer) {
     ctx.fillRect(x, y, 50, 50);
 }
 
-// ← ADD: emit attack event on “Z” keypress
+// ← ADD: emit attack event on "Z" keypress
 window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyZ') {
         const me = gameState.players[currentUsername];
@@ -208,10 +216,150 @@ if (canvas) {
 
 // Check if user is already logged in when page loads
 document.addEventListener('DOMContentLoaded', () => {
-    const token = localStorage.getItem('gameAuthToken');
     const username = localStorage.getItem('username');
     
-    if (token && username && window.location.pathname === '/') {
+    if (username && window.location.pathname === '/') {
         window.location.href = '/lobby';
     }
 });
+
+// --- BEGIN GAME ROOM LOGIC ---
+if (window.location.pathname.includes('/join-room/')) {
+    // Get roomId from URL
+    const roomId = window.location.pathname.split('/').pop();
+    const currentUsername = localStorage.getItem('username');
+    const playerCountElem = document.getElementById('player-count');
+    const playersListElem = document.getElementById('players');
+    const leaveRoomBtn = document.getElementById('leave-room-btn');
+    // Set fixed canvas size
+    canvas.width = 800;
+    canvas.height = 600;
+    // Robust game state (single source of truth)
+    let gameState = { players: {} };
+    // Only emit join_room after socket is connected
+    socket.on('connect', () => {
+        socket.emit('join_room', {
+            room_id: roomId,
+            username: currentUsername
+        });
+    });
+    // Handle game state updates
+    socket.on('game_state', (state) => {
+        console.log('Received game_state:', state);
+        gameState.players = state.players;
+        // Update player count and list
+        if (playerCountElem) {
+            playerCountElem.textContent = `${state.player_count || Object.keys(state.players).length}/${state.max_players || 4}`;
+        }
+        if (playersListElem) {
+            playersListElem.innerHTML = Object.keys(state.players).map(player => 
+                `<li class="${player === currentUsername ? 'current-player' : ''}">${player}${player === currentUsername ? ' (You)' : ''}</li>`
+            ).join('');
+        }
+        updateGame();
+    });
+    // Update player count/list on player_left
+    socket.on('player_left', (data) => {
+        if (playerCountElem) {
+            playerCountElem.textContent = `${data.players.length}/${gameState.max_players || 4}`;
+        }
+        if (playersListElem) {
+            playersListElem.innerHTML = data.players.map(player =>
+                `<li class="${player === currentUsername ? 'current-player' : ''}">${player}${player === currentUsername ? ' (You)' : ''}</li>`
+            ).join('');
+        }
+        updateGame();
+    });
+    // Input handling
+    const keys = {};
+    window.addEventListener('keydown', (e) => {
+        keys[e.code] = true;
+        if(e.code === 'Space') e.preventDefault();
+    });
+    window.addEventListener('keyup', (e) => keys[e.code] = false);
+    function handleInput() {
+        if (!gameState.players[currentUsername]) return;
+        const player = gameState.players[currentUsername];
+        let moved = false;
+        if (keys['ArrowLeft'] && player.x > 25) {
+            player.x -= 5;
+            moved = true;
+        }
+        if (keys['ArrowRight'] && player.x < canvas.width - 25) {
+            player.x += 5;
+            moved = true;
+        }
+        if (keys['Space'] && player.y >= canvas.height - 100) {
+            player.y -= 200;
+            moved = true;
+        }
+        if (moved) {
+            socket.emit('player_move', {
+                room_id: roomId,
+                username: currentUsername,
+                position: {
+                    x: player.x,
+                    y: player.y,
+                    score: player.score || 0
+                }
+            });
+        }
+    }
+    // Apply gravity
+    setInterval(() => {
+        if (gameState.players[currentUsername]) {
+            const player = gameState.players[currentUsername];
+            if (player.y < canvas.height - 100) {
+                player.y = Math.min(player.y + 5, canvas.height - 100);
+                socket.emit('player_move', {
+                    room_id: roomId,
+                    username: currentUsername,
+                    position: {
+                        x: player.x,
+                        y: player.y,
+                        score: player.score || 0
+                    }
+                });
+            }
+        }
+    }, 20);
+    // Draw all players
+    function updateGame() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#666';
+        ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+        Object.entries(gameState.players).forEach(([username, player]) => {
+            ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${username} (${player.score || 0})`, player.x, player.y - 35);
+        });
+    }
+    // Game loop
+    function gameLoop() {
+        handleInput();
+        updateGame();
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+    // Leave room button
+    if (leaveRoomBtn) {
+        leaveRoomBtn.addEventListener('click', () => {
+            leaveRoomBtn.disabled = true;
+            console.log('Emitting leave_room...');
+            socket.emit('leave_room', {
+                room_id: roomId,
+                username: currentUsername
+            });
+            socket.once('left_room', () => {
+                console.log('Received left_room confirmation');
+                window.location.href = '/lobby';
+            });
+        });
+    }
+}
+// --- END GAME ROOM LOGIC ---
