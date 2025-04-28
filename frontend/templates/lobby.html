@@ -62,146 +62,186 @@
         const username = localStorage.getItem('username');
         document.getElementById('lobby-username').textContent = username;
 
-        // Initialize Socket.IO with reconnection options
-        const socket = io({
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000
-        });
-        
-        // Monitor socket connection status
-        window.socketStatus = {
-            connected: false,
-            lastEvent: null,
-            events: []
-        };
-        
-        socket.on('connect', () => {
-            console.log('Socket connected!', socket.id);
-            window.socketStatus.connected = true;
-            window.socketStatus.lastEvent = 'connect';
-            window.socketStatus.events.push({event: 'connect', time: new Date()});
-            
-            // Notify server about user login
-            socket.emit('user_login', { username });
-        });
-        
-        socket.on('disconnect', () => {
-            console.log('Socket disconnected!');
-            window.socketStatus.connected = false;
-            window.socketStatus.lastEvent = 'disconnect';
-            window.socketStatus.events.push({event: 'disconnect', time: new Date()});
-        });
-        
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-            window.socketStatus.lastEvent = 'connect_error';
-            window.socketStatus.events.push({event: 'connect_error', time: new Date(), error});
-        });
-        
-        // Expose a debug function
-        window.checkSocketStatus = () => {
-            console.log('Socket connected:', window.socketStatus.connected);
-            console.log('Socket ID:', socket.id);
-            console.log('Last event:', window.socketStatus.lastEvent);
-            console.log('Recent events:', window.socketStatus.events.slice(-5));
-            return window.socketStatus;
-        };
-
-        // Function to update active users list
-        function updateActiveUsersList(users) {
-            const activeUsersList = document.getElementById('active-users-list');
-            if (!users || users.length === 0) {
-                activeUsersList.innerHTML = '<p class="no-users">No players online.</p>';
+        // Check authentication status when page loads
+        document.addEventListener('DOMContentLoaded', async function() {
+            const token = localStorage.getItem('gameAuthToken');
+            if (!token) {
+                window.location.href = '/login';
                 return;
             }
 
-            let html = '<ul class="users-list">';
-            users.forEach(user => {
-                const isCurrentUser = user === username;
-                html += `<li class="${isCurrentUser ? 'current-user' : ''}">${user} ${isCurrentUser ? '(You)' : ''}</li>`;
-            });
-            html += '</ul>';
-            activeUsersList.innerHTML = html;
-        }
-
-        // Listen for active users updates
-        socket.on('active_users_update', (users) => {
-            updateActiveUsersList(users);
-        });
-
-        // Initialize active users list on page load
-        fetch('/api/active-users')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch active users: ${response.status}`);
+            try {
+                const response = await fetch('/api/auth/check', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                if (!data.authenticated) {
+                    // Clear invalid token
+                    localStorage.removeItem('gameAuthToken');
+                    localStorage.removeItem('username');
+                    window.location.href = '/login';
+                    return;
                 }
-                return response.json();
-            })
-            .then(data => {
-                updateActiveUsersList(data.users);
-            })
-            .catch(error => {
-                console.error('Error fetching active users:', error);
-                // Show empty user list if there's an error
-                updateActiveUsersList([]);
-            });
+                
+                // Update UI with username
+                document.getElementById('lobby-username').textContent = data.username;
+                
+                // Initialize socket connection only after successful auth
+                initializeSocket(data.username);
+            } catch (error) {
+                console.error('Auth check failed:', error);
+                localStorage.removeItem('gameAuthToken');
+                localStorage.removeItem('username');
+                window.location.href = '/login';
+            }
+        });
 
-        // Function to update room list
-        function updateRoomsList(rooms) {
-            const roomsList = document.getElementById('rooms-list');
-            if (!rooms || rooms.length === 0) {
-                roomsList.innerHTML = '<p class="no-rooms">No rooms available. Create one to get started!</p>';
-                return;
+        // Move socket initialization to a separate function
+        function initializeSocket(username) {
+            // Initialize Socket.IO with reconnection options
+            const socket = io({
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000
+            });
+            
+            // Monitor socket connection status
+            window.socketStatus = {
+                connected: false,
+                lastEvent: null,
+                events: []
+            };
+            
+            socket.on('connect', () => {
+                console.log('Socket connected!', socket.id);
+                window.socketStatus.connected = true;
+                window.socketStatus.lastEvent = 'connect';
+                window.socketStatus.events.push({event: 'connect', time: new Date()});
+                
+                // Notify server about user login
+                socket.emit('user_login', { username });
+            });
+            
+            socket.on('disconnect', () => {
+                console.log('Socket disconnected!');
+                window.socketStatus.connected = false;
+                window.socketStatus.lastEvent = 'disconnect';
+                window.socketStatus.events.push({event: 'disconnect', time: new Date()});
+            });
+            
+            socket.on('connect_error', (error) => {
+                console.error('Connection error:', error);
+                window.socketStatus.lastEvent = 'connect_error';
+                window.socketStatus.events.push({event: 'connect_error', time: new Date(), error});
+            });
+            
+            // Expose a debug function
+            window.checkSocketStatus = () => {
+                console.log('Socket connected:', window.socketStatus.connected);
+                console.log('Socket ID:', socket.id);
+                console.log('Last event:', window.socketStatus.lastEvent);
+                console.log('Recent events:', window.socketStatus.events.slice(-5));
+                return window.socketStatus;
+            };
+
+            // Function to update active users list
+            function updateActiveUsersList(users) {
+                const activeUsersList = document.getElementById('active-users-list');
+                if (!users || users.length === 0) {
+                    activeUsersList.innerHTML = '<p class="no-users">No players online.</p>';
+                    return;
+                }
+
+                let html = '<ul class="users-list">';
+                users.forEach(user => {
+                    const isCurrentUser = user === username;
+                    html += `<li class="${isCurrentUser ? 'current-user' : ''}">${user} ${isCurrentUser ? '(You)' : ''}</li>`;
+                });
+                html += '</ul>';
+                activeUsersList.innerHTML = html;
             }
 
-            let html = '';
-            rooms.forEach(room => {
-                html += `
-                <div class="room-card" data-room-id="${room._id}">
-                    <h3>${room.name}</h3>
-                    <p>Players: ${room.players.length}/${room.max_players}</p>
-                    <button class="join-btn" onclick="joinRoom('${room._id}')">Join Room</button>
-                </div>`;
+            // Listen for active users updates
+            socket.on('active_users_update', (users) => {
+                updateActiveUsersList(users);
             });
-            roomsList.innerHTML = html;
-        }
 
-        // Listen for room updates
-        socket.on('room_update', () => {
-            // Fetch updated room list
+            // Initialize active users list on page load
+            fetch('/api/active-users')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch active users: ${response.status}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    updateActiveUsersList(data.users);
+                })
+                .catch(error => {
+                    console.error('Error fetching active users:', error);
+                    // Show empty user list if there's an error
+                    updateActiveUsersList([]);
+                });
+
+            // Function to update room list
+            function updateRoomsList(rooms) {
+                const roomsList = document.getElementById('rooms-list');
+                if (!rooms || rooms.length === 0) {
+                    roomsList.innerHTML = '<p class="no-rooms">No rooms available. Create one to get started!</p>';
+                    return;
+                }
+
+                let html = '';
+                rooms.forEach(room => {
+                    html += `
+                    <div class="room-card" data-room-id="${room._id}">
+                        <h3>${room.name}</h3>
+                        <p>Players: ${room.players.length}/${room.max_players}</p>
+                        <button class="join-btn" onclick="joinRoom('${room._id}')">Join Room</button>
+                    </div>`;
+                });
+                roomsList.innerHTML = html;
+            }
+
+            // Listen for room updates
+            socket.on('room_update', () => {
+                // Fetch updated room list
+                fetch('/api/rooms')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            updateRoomsList(data.rooms);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching rooms:', error);
+                    });
+            });
+
+            // Fetch rooms initially to ensure we have the latest data
             fetch('/api/rooms')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch rooms: ${response.status}`);
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     if (data.success) {
                         updateRoomsList(data.rooms);
+                    } else {
+                        throw new Error(data.message || 'Failed to fetch rooms');
                     }
                 })
                 .catch(error => {
                     console.error('Error fetching rooms:', error);
+                    // Show empty rooms list if there's an error
+                    updateRoomsList([]);
                 });
-        });
-
-        // Fetch rooms initially to ensure we have the latest data
-        fetch('/api/rooms')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`Failed to fetch rooms: ${response.status}`);
-                }
-                return response.json();
-            })
-            .then(data => {
-                if (data.success) {
-                    updateRoomsList(data.rooms);
-                } else {
-                    throw new Error(data.message || 'Failed to fetch rooms');
-                }
-            })
-            .catch(error => {
-                console.error('Error fetching rooms:', error);
-                // Show empty rooms list if there's an error
-                updateRoomsList([]);
-            });
+        }
 
         // Logout functionality
         document.getElementById('logout-btn').addEventListener('click', async () => {

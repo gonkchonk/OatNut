@@ -30,87 +30,69 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script>
-        // Socket connection is optional on login page
-        // We'll only establish it once user logs in
-        let socket;
-        
-        // Check if user is already logged in
-        const token = localStorage.getItem('gameAuthToken');
-        const username = localStorage.getItem('username');
-        
-        if (token && username) {
-            // User is already logged in, redirect to lobby
-            window.location.href = '/lobby';
-        }
-        
-        // For debugging purposes
-        function initSocket() {
-            socket = io({
-                reconnection: true,
-                reconnectionAttempts: 5,
-                reconnectionDelay: 1000
-            });
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
             
-            console.log('Socket initialized on login page');
+            // Disable the form while processing
+            const form = e.target;
+            const submitButton = form.querySelector('button[type="submit"]');
+            submitButton.disabled = true;
             
-            socket.on('connect', () => {
-                console.log('Socket connected on login page:', socket.id);
-            });
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
             
-            socket.on('connect_error', (error) => {
-                console.error('Socket connection error on login page:', error);
-            });
-            
-            return socket;
-        }
-        
-        // Check authentication status
-        async function checkAuthStatus() {
             try {
-                const token = localStorage.getItem('gameAuthToken');
-                const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-                
-                const response = await fetch('/api/auth/check', {
-                    method: 'GET',
-                    headers: headers
+                console.log('Attempting login...');
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
                 });
                 
-                if (!response.ok) {
-                    console.error('Auth check failed:', response.status);
-                    return { success: false, authenticated: false };
-                }
-                
+                console.log('Login response status:', response.status);
                 const data = await response.json();
-                console.log('Auth status:', data);
+                console.log('Login response data:', data);
                 
-                if (data.authenticated) {
-                    // If authenticated, redirect to lobby
-                    window.location.href = '/lobby';
+                if (response.ok && data.success) {
+                    console.log('Login successful, storing token and redirecting...');
+                    // Store the token and username
+                    localStorage.setItem('gameAuthToken', data.token);
+                    localStorage.setItem('username', data.username);
+                    
+                    // Clear any previous error messages
+                    document.getElementById('login-status').textContent = '';
+                    
+                    // Force redirect using window.location.replace
+                    console.log('Redirecting to lobby...');
+                    window.location.replace('/lobby');
+                    return false;
+                } else {
+                    console.log('Login failed:', data.message);
+                    // Show error message
+                    document.getElementById('login-status').textContent = data.message || 'Login failed';
+                    
+                    // Re-enable the form
+                    submitButton.disabled = false;
+                    
+                    // Clear the password field
+                    document.getElementById('password').value = '';
                 }
-                
-                return data;
             } catch (error) {
-                console.error('Auth check error:', error);
-                return { success: false, authenticated: false };
+                console.error('Login error:', error);
+                document.getElementById('login-status').textContent = 'Login failed. Please try again.';
+                submitButton.disabled = false;
+                document.getElementById('password').value = '';
             }
-        }
-        
-        // Expose debug functions
-        window.debugLogin = {
-            initSocket: initSocket,
-            checkAuthStatus: checkAuthStatus,
-            checkLocalStorage: () => {
-                console.log({
-                    token: localStorage.getItem('gameAuthToken'),
-                    username: localStorage.getItem('username')
-                });
-            },
-            clearStorage: () => {
-                localStorage.removeItem('gameAuthToken');
-                localStorage.removeItem('username');
-                console.log('Local storage cleared');
-            }
-        };
+        });
+
+        // Handle registration link click
+        document.getElementById('show-register').addEventListener('click', (e) => {
+            e.preventDefault();
+            // You can implement registration functionality here
+            alert('Registration coming soon!');
+        });
     </script>
     <script src="{{ url_for('static', filename='js/game.js') }}"></script>
 </body>

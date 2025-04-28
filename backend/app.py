@@ -13,6 +13,8 @@ import bcrypt
 import datetime
 import time
 import math
+import jwt
+from datetime import datetime, timedelta
 
 # Initialize Flask app
 app = Flask(__name__, 
@@ -710,12 +712,24 @@ def login():
             return jsonify({"success": False, "message": "Authentication error"}), 500
             
         if pw_check:
+            # Create user object and log them in with Flask-Login
             user = User.from_dict(user_doc)
             login_user(user)
-            token = create_authtoken(str(user_doc["_id"]))
+            
+            # Create JWT token
+            token = jwt.encode({
+                'user_id': str(user_doc['_id']),
+                'username': username,
+                'exp': datetime.utcnow() + timedelta(days=1)  # Token expires in 1 day
+            }, app.config['SECRET_KEY'], algorithm='HS256')
             
             app.logger.info(f"User {username} logged in successfully")
-            return jsonify({"success": True, "token": token, "username": username}), 200
+            return jsonify({
+                "success": True,
+                "token": token,
+                "username": username,
+                "redirect": "/lobby"  # Add explicit redirect URL
+            }), 200
         else:
             app.logger.warning(f"Login failed: Invalid password for user {username}")
             return jsonify({"success": False, "message": "Invalid credentials"}), 401
@@ -758,6 +772,10 @@ def logout():
 @login_required
 def lobby():
     try:
+        if not current_user.is_authenticated:
+            app.logger.warning("Unauthenticated user tried to access lobby")
+            return redirect(url_for('index'))
+            
         app.logger.info(f"Lobby accessed by: {current_user.username}")
         
         # Get all available game rooms
@@ -834,53 +852,40 @@ def join_room_route(room_id):
         app.logger.error(f"Error joining room: {str(e)}", exc_info=True)
         return jsonify({"success": False, "message": f"Error joining room: {str(e)}"}), 500
 
-@app.route('/api/auth/check', methods=['GET'])
+@app.route('/api/auth/check')
 def check_auth():
-    """Check if the current user is authenticated"""
     try:
-        # Check login status from Flask-Login first
-        if current_user.is_authenticated:
-            return jsonify({
-                "success": True, 
-                "authenticated": True,
-                "username": current_user.username
-            }), 200
-        
-        # Check for auth token in headers or params
         auth_header = request.headers.get('Authorization')
-        token = None
-        
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header[7:]  # Remove 'Bearer ' prefix
-        else:
-            # Try to get token from query param
-            token = request.args.get('token')
-        
-        if token and verify_authtoken(token):
-            # Get the user ID from the token
-            user_id = get_userid_from_token(token)
-            if user_id:
-                # Get the username from the user ID
-                user = db.users.find_one({"_id": ObjectId(user_id)})
-                if user:
-                    return jsonify({
-                        "success": True, 
-                        "authenticated": True,
-                        "username": user['username']
-                    }), 200
-        
-        # Not authenticated
-        return jsonify({
-            "success": True, 
-            "authenticated": False
-        }), 200
+        if not auth_header or not auth_header.startswith('Bearer '):
+            return jsonify({'authenticated': False, 'message': 'No token provided'}), 401
+            
+        token = auth_header.split(' ')[1]
+        try:
+            # Verify the token
+            payload = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+            user_id = payload.get('user_id')
+            
+            if not user_id:
+                return jsonify({'authenticated': False, 'message': 'Invalid token format'}), 401
+                
+            # Get user from database
+            user = db.users.find_one({"_id": ObjectId(user_id)})
+            if not user:
+                return jsonify({'authenticated': False, 'message': 'User not found'}), 401
+                
+            return jsonify({
+                'authenticated': True,
+                'username': user['username']
+            })
+            
+        except jwt.ExpiredSignatureError:
+            return jsonify({'authenticated': False, 'message': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'authenticated': False, 'message': 'Invalid token'}), 401
+            
     except Exception as e:
-        app.logger.error(f"Auth check error: {str(e)}", exc_info=True)
-        return jsonify({
-            "success": False, 
-            "authenticated": False,
-            "message": "Error checking authentication status"
-        }), 500
+        app.logger.error(f"Auth check error: {str(e)}")
+        return jsonify({'authenticated': False, 'message': 'Server error'}), 500
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=8080, debug=True)
