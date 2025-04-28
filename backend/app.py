@@ -569,10 +569,21 @@ if not os.path.exists('logs'):
     os.makedirs('logs')
 
 try:
+    # Create a custom formatter that includes IP address
+    class RequestFormatter(logging.Formatter):
+        def format(self, record):
+            if hasattr(record, 'ip'):
+                record.ip_info = f'[{record.ip}]'
+            else:
+                record.ip_info = '[no IP]'
+            return super().format(record)
+
+    # Set up file handler with the custom formatter
     file_handler = RotatingFileHandler('logs/app.log', maxBytes=10240, backupCount=10)
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-    ))
+    formatter = RequestFormatter(
+        '%(asctime)s %(ip_info)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    )
+    file_handler.setFormatter(formatter)
     file_handler.setLevel(logging.INFO)
     app.logger.addHandler(file_handler)
     app.logger.setLevel(logging.INFO)
@@ -588,10 +599,11 @@ except Exception as e:
 
 @app.before_request
 def log_request():
-    ip     = request.remote_addr or '-'
+    ip = request.remote_addr or '-'
     method = request.method
-    path   = request.path
-    app.logger.info(f"[{ip}] {method} {path}")
+    path = request.path
+    # Include IP in the log record
+    app.logger.info(f"{method} {path}", extra={'ip': ip})
 
 @app.route('/')
 def index():
