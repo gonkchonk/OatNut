@@ -2,6 +2,21 @@
 
 A multiplayer online game built with Flask, WebSocket, and MongoDB.
 
+## 🚀 Live Demo
+
+**Deployed At:** https://ilovejesse312.me  
+
+---
+
+## 🛠️ Features
+
+- Real-time, continuous movement broadcast via WebSockets  
+- Room creation, join/leave, and dynamic in-game player lists  
+- Projectile & melee combat with health/lives tracking  
+- Persistent user accounts & stats in MongoDB  
+
+---
+
 ## Setup
 
 1. Make sure you have Docker installed
