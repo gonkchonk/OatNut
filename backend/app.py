@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -15,6 +17,7 @@ import time
 import math
 import jwt
 from datetime import datetime, timedelta
+from threading import Lock
 
 # Initialize Flask app
 app = Flask(__name__, 
@@ -31,12 +34,16 @@ login_manager.login_view = 'login'
 # Initialize SocketIO
 socketio = SocketIO(
     app, 
+    async_mode='eventlet',     # force Eventlet
     cors_allowed_origins="*",  # Allow all origins
     logger=True,              # Enable logging
     engineio_logger=True,     # Enable Engine.IO logging
     ping_timeout=60,          # Increase ping timeout
     ping_interval=25          # Increase ping interval
 )
+
+pending_moves = {}        # { room_id: { username: {'x':…, 'y':…}, … } }
+pending_lock  = Lock()
 
 # Try to connect to MongoDB - if it fails we'll handle gracefully
 try:
@@ -251,6 +258,12 @@ def handle_player_move(data):
         room_id = data['room_id']
         username = data['username']
         position = data['position']
+
+        with pending_lock:
+            pending_moves.setdefault(room_id, {})[username] = {
+                'x': position['x'],
+                'y': position['y']
+            }
         
         if room_id in game_states and username in game_states[room_id]['players']:
             # Update player position
@@ -269,6 +282,22 @@ def handle_player_move(data):
             }, room=room_id)
     except Exception as e:
         app.logger.error(f"Error in handle_player_move: {str(e)}")
+
+
+def broadcaster():
+    """Background task: every 50 ms, send out all buffered deltas."""
+    while True:
+        socketio.sleep(0.05)  # 50 ms = 20 Hz
+        with pending_lock:
+            for room, moves in list(pending_moves.items()):
+                if not moves:
+                    continue
+                # emit only the changed positions
+                socketio.emit('player_move_batch', moves, room=room)
+                pending_moves[room].clear()
+
+# Start it once when your app launches:
+socketio.start_background_task(broadcaster)
 
 @socketio.on('player_attack')
 def handle_player_attack(data):
@@ -900,4 +929,4 @@ def check_auth():
         return jsonify({'authenticated': False, 'message': 'Server error'}), 500
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=8080, debug=True)
+    socketio.run(app, host='0.0.0.0', port=8080, debug=False)
