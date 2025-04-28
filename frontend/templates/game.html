@@ -72,11 +72,16 @@
             events: []
         };
         
-        // Initialize socket connection before game.js loads
+        // Get protocol from current page
+        const isSecure = window.location.protocol === 'https:';
+        
+        // Initialize Socket.IO with appropriate protocol
         const socket = io({
             reconnection: true,
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000
+            reconnectionDelay: 1000,
+            secure: isSecure,
+            transports: ['websocket']
         });
         
         // Monitor socket connection
