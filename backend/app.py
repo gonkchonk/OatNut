@@ -264,22 +264,6 @@ def handle_player_move(data):
                 'x': position['x'],
                 'y': position['y']
             }
-        
-        if room_id in game_states and username in game_states[room_id]['players']:
-            # Update player position
-            game_states[room_id]['players'][username].update(position)
-            
-            # Get room details from database
-            room = db.rooms.find_one({"_id": ObjectId(room_id)})
-            max_players = room.get('max_players', 4) if room else 4
-            
-            # Broadcast updated game state including win counts
-            socketio.emit('game_state', {
-                'players': game_states[room_id]['players'],
-                'player_count': len(game_states[room_id]['players']),
-                'max_players': max_players,
-                'win_counts': game_states[room_id]['win_counts']
-            }, room=room_id)
     except Exception as e:
         app.logger.error(f"Error in handle_player_move: {str(e)}")
 
