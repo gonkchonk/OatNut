@@ -821,7 +821,7 @@ def create_room():
         return jsonify({"success": True, "room_id": str(room_id)}), 201
     except Exception as e:
         app.logger.error(f"Error creating room: {str(e)}", exc_info=True)
-         return jsonify({"success": False, "message": f"Error creating room: {str(e)}"}), 500
+        return jsonify({"success": False, "message": f"Error creating room: {str(e)}"}), 500
 
 @app.route('/join-room/<room_id>')
 @login_required
