@@ -203,6 +203,8 @@ socket.on('player_move_batch', deltas => {
         gameState.players[user].y = pos.y;
       }
     });
+    // redraw with only the updated positions
+    updateGame();
   });
 
 // Add health update handler
