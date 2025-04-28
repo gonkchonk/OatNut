@@ -589,14 +589,37 @@ class RespawnParticle {
 // Add respawn effect system
 const respawnEffects = new Map(); // Map of username to their respawn effect
 
-// Add platform configuration
-const platform = {
-    x: 300,  // Position from left
-    y: 400,  // Height from top
-    width: 200,
-    height: 20,
-    color: '#8B4513'  // Brown color for platform
-};
+// Replace single platform with multiple platforms
+const platforms = [
+    {
+        x: 300,
+        y: 400,
+        width: 200,
+        height: 20,
+        color: '#8B4513'
+    },
+    {
+        x: 100,
+        y: 300,
+        width: 150,
+        height: 20,
+        color: '#8B4513'
+    },
+    {
+        x: 500,
+        y: 250,
+        width: 180,
+        height: 20,
+        color: '#8B4513'
+    },
+    {
+        x: 300,
+        y: 150,
+        width: 160,
+        height: 20,
+        color: '#8B4513'
+    }
+];
 
 // Update physics configuration
 const jumpConfig = {
@@ -608,7 +631,12 @@ const jumpConfig = {
     friction: 0.85    // Ground friction
 };
 
-// Add horizontal velocity to player state
+// Add ground configuration
+const GROUND_HEIGHT = 50;
+const PLAYER_RADIUS = 25;
+const FLOOR_Y = canvas.height - GROUND_HEIGHT;
+
+// Update handleInput function to work with multiple platforms
 function handleInput() {
     if (!gameState.players[currentUsername]) {
         return;
@@ -621,16 +649,16 @@ function handleInput() {
     if (player.velocityY === undefined) player.velocityY = 0;
     if (player.velocityX === undefined) player.velocityX = 0;
     
-    // Check if player is on platform
-    const onPlatform = (
-        player.y >= platform.y - 25 &&
+    // Check if player is on any platform
+    const onPlatform = platforms.some(platform => (
+        player.y >= platform.y - PLAYER_RADIUS &&
         player.y <= platform.y + 10 &&
-        player.x >= platform.x - 25 &&
-        player.x <= platform.x + platform.width + 25
-    );
+        player.x >= platform.x - PLAYER_RADIUS &&
+        player.x <= platform.x + platform.width + PLAYER_RADIUS
+    ));
     
     // Check if player is on ground
-    const onGround = player.y >= canvas.height - 100;
+    const onGround = player.y >= FLOOR_Y - PLAYER_RADIUS;
     const isGrounded = onGround || onPlatform;
     
     // Initialize facing direction if it doesn't exist
@@ -682,19 +710,22 @@ function handleInput() {
     player.y += player.velocityY;
     
     // Handle ground collision
-    if (player.y >= canvas.height - 100) {
-        player.y = canvas.height - 100;
+    if (player.y >= FLOOR_Y - PLAYER_RADIUS) {
+        player.y = FLOOR_Y - PLAYER_RADIUS;
         player.velocityY = 0;
     }
     
-    // Handle platform collision
-    if (player.velocityY > 0 && // Moving downward
-        player.y >= platform.y - 25 &&
-        player.y <= platform.y + platform.height &&
-        player.x >= platform.x - 25 &&
-        player.x <= platform.x + platform.width + 25) {
-        player.y = platform.y - 25;
-        player.velocityY = 0;
+    // Handle platform collisions
+    for (const platform of platforms) {
+        if (player.velocityY > 0 && // Moving downward
+            player.y >= platform.y - PLAYER_RADIUS &&
+            player.y <= platform.y + platform.height &&
+            player.x >= platform.x - PLAYER_RADIUS &&
+            player.x <= platform.x + platform.width + PLAYER_RADIUS) {
+            player.y = platform.y - PLAYER_RADIUS;
+            player.velocityY = 0;
+            break;
+        }
     }
     
     // Attack handling (keep existing attack code)
@@ -867,19 +898,26 @@ function updateGame() {
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Draw the floor
+    // Draw the floor with proper height
     ctx.fillStyle = '#666';
-    ctx.fillRect(0, 0, canvas.width, canvas.height - 50);
+    ctx.fillRect(0, FLOOR_Y, canvas.width, GROUND_HEIGHT);
     
-    // Draw the platform
-    ctx.fillStyle = platform.color;
-    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    // Add floor highlight for better visibility
+    ctx.fillStyle = '#777';
+    ctx.fillRect(0, FLOOR_Y, canvas.width, 2);
     
-    // Add platform shadow/highlight for 3D effect
-    ctx.fillStyle = '#6B3410'; // Darker brown for shadow
-    ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
-    ctx.fillStyle = '#A0522D'; // Lighter brown for highlight
-    ctx.fillRect(platform.x, platform.y, platform.width, 2);
+    // Draw all platforms
+    platforms.forEach(platform => {
+        // Draw the platform
+        ctx.fillStyle = platform.color;
+        ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+        
+        // Add platform shadow/highlight for 3D effect
+        ctx.fillStyle = '#6B3410';
+        ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
+        ctx.fillStyle = '#A0522D';
+        ctx.fillRect(platform.x, platform.y, platform.width, 2);
+    });
     
     // Draw all players
     Object.entries(gameState.players).forEach(([username, player]) => {
@@ -906,15 +944,16 @@ function updateGame() {
         if (!player.dead && !player.waitingForShield && !player.eliminated) {
             // Draw invulnerability effect if player is invulnerable
             if (player.invulnerable && currentTime < player.invulnerable_until) {
-                // Draw shield circle
                 ctx.beginPath();
-                ctx.arc(player.x, player.y, 35, 0, Math.PI * 2);
+                ctx.arc(player.x, player.y, PLAYER_RADIUS + 10, 0, Math.PI * 2);
                 ctx.strokeStyle = '#64c8ff';
                 ctx.lineWidth = 3;
                 ctx.stroke();
                 
-                // Draw shield glow
-                const gradient = ctx.createRadialGradient(player.x, player.y, 25, player.x, player.y, 40);
+                const gradient = ctx.createRadialGradient(
+                    player.x, player.y, PLAYER_RADIUS,
+                    player.x, player.y, PLAYER_RADIUS + 15
+                );
                 gradient.addColorStop(0, 'rgba(100, 200, 255, 0.2)');
                 gradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
                 ctx.fillStyle = gradient;
@@ -923,8 +962,14 @@ function updateGame() {
             
             // Draw player circle
             ctx.beginPath();
-            ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
+            ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
             ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
+            ctx.fill();
+            
+            // Draw slight shadow under player for grounding effect
+            ctx.beginPath();
+            ctx.ellipse(player.x, player.y + PLAYER_RADIUS - 2, PLAYER_RADIUS - 5, 8, 0, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
             ctx.fill();
             
             // Draw player name and win count
@@ -1288,16 +1333,16 @@ if (window.location.pathname.includes('/join-room/')) {
             moved = true;
         }
         
-        // Check if player is on platform
-        const onPlatform = (
-            player.y >= platform.y - 25 && // Player bottom touches platform top
+        // Check if player is on any platform
+        const onPlatform = platforms.some(platform => (
+            player.y >= platform.y - PLAYER_RADIUS && // Player bottom touches platform top
             player.y <= platform.y + 10 && // Small tolerance for landing
-            player.x >= platform.x - 25 && // Player left side is past platform left edge
-            player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
-        );
+            player.x >= platform.x - PLAYER_RADIUS && // Player left side is past platform left edge
+            player.x <= platform.x + platform.width + PLAYER_RADIUS // Player right side is before platform right edge
+        ));
         
         // Check if player is on ground
-        const onGround = player.y >= canvas.height - 100;
+        const onGround = player.y >= FLOOR_Y - PLAYER_RADIUS;
         
         // Initialize velocityY if it doesn't exist
         if (player.velocityY === undefined) {
@@ -1315,19 +1360,22 @@ if (window.location.pathname.includes('/join-room/')) {
         player.y += player.velocityY;
         
         // Handle ground collision
-        if (player.y >= canvas.height - 100) {
-            player.y = canvas.height - 100;
+        if (player.y >= FLOOR_Y - PLAYER_RADIUS) {
+            player.y = FLOOR_Y - PLAYER_RADIUS;
             player.velocityY = 0;
         }
         
-        // Handle platform collision
-        if (player.velocityY > 0 && // Moving downward
-            player.y >= platform.y - 25 && // Below platform top
-            player.y <= platform.y + platform.height && // Above platform bottom
-            player.x >= platform.x - 25 && // Right of platform left
-            player.x <= platform.x + platform.width + 25) { // Left of platform right
-            player.y = platform.y - 25;
-            player.velocityY = 0;
+        // Handle platform collisions
+        for (const platform of platforms) {
+            if (player.velocityY > 0 && // Moving downward
+                player.y >= platform.y - PLAYER_RADIUS &&
+                player.y <= platform.y + platform.height &&
+                player.x >= platform.x - PLAYER_RADIUS &&
+                player.x <= platform.x + platform.width + PLAYER_RADIUS) {
+                player.y = platform.y - PLAYER_RADIUS;
+                player.velocityY = 0;
+                break;
+            }
         }
         
         // Attack with Z key
@@ -1397,16 +1445,16 @@ if (window.location.pathname.includes('/join-room/')) {
                 player.velocityY = 0;
             }
             
-            // Check if player is on platform
-            const onPlatform = (
-                player.y >= platform.y - 25 && // Player bottom touches platform top
+            // Check if player is on any platform
+            const onPlatform = platforms.some(platform => (
+                player.y >= platform.y - PLAYER_RADIUS && // Player bottom touches platform top
                 player.y <= platform.y + 10 && // Small tolerance for landing
-                player.x >= platform.x - 25 && // Player left side is past platform left edge
-                player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
-            );
+                player.x >= platform.x - PLAYER_RADIUS && // Player left side is past platform left edge
+                player.x <= platform.x + platform.width + PLAYER_RADIUS // Player right side is before platform right edge
+            ));
             
             // Check if player is on ground
-            const onGround = player.y >= canvas.height - 100;
+            const onGround = player.y >= FLOOR_Y - PLAYER_RADIUS;
             
             // Apply gravity if not on ground and not on platform
             if (!onGround && !onPlatform) {
@@ -1438,19 +1486,26 @@ if (window.location.pathname.includes('/join-room/')) {
         // Clear the canvas
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
-        // Draw the floor
+        // Draw the floor with proper height
         ctx.fillStyle = '#666';
-        ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
+        ctx.fillRect(0, FLOOR_Y, canvas.width, GROUND_HEIGHT);
         
-        // Draw the platform
-        ctx.fillStyle = platform.color;
-        ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+        // Add floor highlight for better visibility
+        ctx.fillStyle = '#777';
+        ctx.fillRect(0, FLOOR_Y, canvas.width, 2);
         
-        // Add platform shadow/highlight for 3D effect
-        ctx.fillStyle = '#6B3410'; // Darker brown for shadow
-        ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
-        ctx.fillStyle = '#A0522D'; // Lighter brown for highlight
-        ctx.fillRect(platform.x, platform.y, platform.width, 2);
+        // Draw all platforms
+        platforms.forEach(platform => {
+            // Draw the platform
+            ctx.fillStyle = platform.color;
+            ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+            
+            // Add platform shadow/highlight for 3D effect
+            ctx.fillStyle = '#6B3410';
+            ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
+            ctx.fillStyle = '#A0522D';
+            ctx.fillRect(platform.x, platform.y, platform.width, 2);
+        });
         
         // Draw all players
         Object.entries(gameState.players).forEach(([username, player]) => {
@@ -1477,15 +1532,16 @@ if (window.location.pathname.includes('/join-room/')) {
             if (!player.dead && !player.waitingForShield && !player.eliminated) {
                 // Draw invulnerability effect if player is invulnerable
                 if (player.invulnerable && currentTime < player.invulnerable_until) {
-                    // Draw shield circle
                     ctx.beginPath();
-                    ctx.arc(player.x, player.y, 35, 0, Math.PI * 2);
+                    ctx.arc(player.x, player.y, PLAYER_RADIUS + 10, 0, Math.PI * 2);
                     ctx.strokeStyle = '#64c8ff';
                     ctx.lineWidth = 3;
                     ctx.stroke();
                     
-                    // Draw shield glow
-                    const gradient = ctx.createRadialGradient(player.x, player.y, 25, player.x, player.y, 40);
+                    const gradient = ctx.createRadialGradient(
+                        player.x, player.y, PLAYER_RADIUS,
+                        player.x, player.y, PLAYER_RADIUS + 15
+                    );
                     gradient.addColorStop(0, 'rgba(100, 200, 255, 0.2)');
                     gradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
                     ctx.fillStyle = gradient;
@@ -1494,8 +1550,14 @@ if (window.location.pathname.includes('/join-room/')) {
                 
                 // Draw player circle
                 ctx.beginPath();
-                ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
+                ctx.arc(player.x, player.y, PLAYER_RADIUS, 0, Math.PI * 2);
                 ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
+                ctx.fill();
+                
+                // Draw slight shadow under player for grounding effect
+                ctx.beginPath();
+                ctx.ellipse(player.x, player.y + PLAYER_RADIUS - 2, PLAYER_RADIUS - 5, 8, 0, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
                 ctx.fill();
                 
                 // Draw player name and win count
