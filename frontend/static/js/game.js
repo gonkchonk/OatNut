@@ -8,9 +8,11 @@ const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
 // Game state
-let gameState = {
+let gameState = { 
     players: {},
-    currentPlayer: null
+    max_players: 4,
+    room_name: 'Game Room',
+    win_counts: {}  // Add win counts tracking
 };
 
 // Login and registration handling
@@ -158,7 +160,13 @@ function joinRoom(roomId) {
 // Socket event handlers
 socket.on('player_joined', (data) => {
     console.log(`${data.username} joined the game`);
-    gameState.players[data.username] = data.position;
+    if (data.username && data.position) {
+        // Initialize velocityY if not present
+        if (!data.position.velocityY) {
+            data.position.velocityY = 0;
+        }
+        gameState.players[data.username] = data.position;
+    }
     updateGame();
 });
 
@@ -178,7 +186,11 @@ socket.on('player_left', (data) => {
 });
 
 socket.on('game_state', (state) => {
-    gameState.players = state.players;
+    // Update game state
+    gameState.players = state.players || {};
+    if (state.win_counts) {
+        gameState.win_counts = state.win_counts;
+    }
     updateGame();
 });
 
@@ -261,6 +273,9 @@ const attackSound = new Audio('https://cdn.freesound.org/previews/350/350985_645
 // Create hit sound
 const hitSound = new Audio('https://cdn.freesound.org/previews/391/391961_7416345-lq.mp3');
 
+// Add game freeze state
+let gameFrozen = false;
+
 // Update game over handler
 socket.on('game_over', (data) => {
     console.log('Game Over:', data);
@@ -276,6 +291,15 @@ socket.on('game_over', (data) => {
         console.error('No winner in game over data:', data);
         return;
     }
+
+    // Freeze the game
+    gameFrozen = true;
+
+    // Update win counts from server data
+    if (data.win_counts) {
+        gameState.win_counts = data.win_counts;
+        console.log('Updated win counts:', gameState.win_counts);
+    }
     
     // Store game over state
     gameOverState = {
@@ -285,66 +309,82 @@ socket.on('game_over', (data) => {
     
     // Play victory sound
     try {
-        // Reset sound to beginning in case it was played before
         victorySound.currentTime = 0;
-        victorySound.volume = 0.5;
-        // Play the victory fanfare
+        victorySound.volume = 0.4;
         victorySound.play().catch(e => console.error('Error playing victory sound:', e));
-        
-        // If current player is the winner, play at higher volume
-        if (winner === currentUsername) {
-            victorySound.volume = 0.7;
-        }
     } catch (error) {
         console.error('Error with victory sound:', error);
     }
     
-    // Create game over message overlay
-    if (!gameOverMessage) {
-        gameOverMessage = document.createElement('div');
-        gameOverMessage.className = 'game-over-message';
-        gameOverMessage.style.position = 'absolute';
-        gameOverMessage.style.top = '50%';
-        gameOverMessage.style.left = '50%';
-        gameOverMessage.style.transform = 'translate(-50%, -50%)';
-        gameOverMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
-        gameOverMessage.style.color = '#fff';
-        gameOverMessage.style.padding = '30px';
-        gameOverMessage.style.borderRadius = '10px';
-        gameOverMessage.style.textAlign = 'center';
-        gameOverMessage.style.zIndex = '100';
-        gameOverMessage.style.boxShadow = '0 0 20px rgba(255, 215, 0, 0.6)';
-        gameOverMessage.style.border = '2px solid #FFD700';
-        gameOverMessage.style.minWidth = '300px';
-        
-        const winnerIsYou = winner === currentUsername;
-        
-        gameOverMessage.innerHTML = `
-            <h2 style="margin-top: 0; color: #FFD700; font-size: 32px;">GAME OVER</h2>
-            <div style="margin: 20px 0; font-size: 24px;">
-                ${winnerIsYou ? 'YOU WIN! 🎉' : `${winner} WINS! 👑`}
-            </div>
-            <div style="margin: 10px 0 20px 0; font-size: 18px;">
-                ${winnerIsYou ? 'Congratulations!' : 'Better luck next time!'}
-            </div>
-            <div style="font-size: 14px; opacity: 0.8; margin-top: 20px;">
-                Game restarting in 5 seconds...
-            </div>
-        `;
-        
-        // Add to game section
-        document.getElementById('game-section').appendChild(gameOverMessage);
+    // Remove any existing game over message
+    if (gameOverMessage && gameOverMessage.parentNode) {
+        gameOverMessage.parentNode.removeChild(gameOverMessage);
+        gameOverMessage = null;
     }
     
-    console.log('Setting game over state:', gameOverState);
+    // Create new game over message
+    gameOverMessage = document.createElement('div');
+    gameOverMessage.style.position = 'absolute';
+    gameOverMessage.style.top = '50%';
+    gameOverMessage.style.left = '50%';
+    gameOverMessage.style.transform = 'translate(-50%, -50%)';
+    gameOverMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+    gameOverMessage.style.color = 'white';
+    gameOverMessage.style.padding = '20px';
+    gameOverMessage.style.textAlign = 'center';
+    gameOverMessage.style.borderRadius = '10px';
+    gameOverMessage.style.border = '2px solid #FFD700';
+    gameOverMessage.style.minWidth = '300px';
+    gameOverMessage.style.zIndex = '1000';
     
-    // Disable controls
+    const winnerIsYou = winner === currentUsername;
+    const currentWinCount = gameState.win_counts[winner] || 0;
+    
+    gameOverMessage.innerHTML = `
+        <h2 style="margin-top: 0; color: #FFD700; font-size: 32px;">GAME OVER</h2>
+        <div style="margin: 20px 0; font-size: 24px;">
+            ${winnerIsYou ? 'YOU WIN! 🎉' : `${winner} WINS! 👑`}
+        </div>
+        <div style="margin: 10px 0 20px 0; font-size: 18px;">
+            ${winnerIsYou ? 'Congratulations!' : 'Better luck next time!'}
+        </div>
+        <div style="font-size: 16px; margin-bottom: 15px;">
+            Win Count: ${currentWinCount}
+        </div>
+        <div style="font-size: 14px; opacity: 0.8; margin-top: 20px;">
+            Game restarting in 5 seconds...
+        </div>
+    `;
+    
+    // Add to game section
+    document.getElementById('game-section').appendChild(gameOverMessage);
+    
+    // Update the players list to reflect new win counts immediately
+    if (playersListElem) {
+        playersListElem.innerHTML = Object.keys(gameState.players).map(player => {
+            const isCurrentPlayer = player === currentUsername;
+            const winCount = gameState.win_counts[player] || 0;
+            return `<li class="${isCurrentPlayer ? 'current-player' : ''}">${player} (${winCount})${isCurrentPlayer ? ' (You)' : ''}</li>`;
+        }).join('');
+    }
+    
+    // Force a game state update to refresh all displays
+    updateGame();
+    
+    // Disable controls during reset
     window.removeEventListener('keydown', handleKeyDown);
     window.removeEventListener('keyup', handleKeyUp);
     
+    // Clear any existing reset timeout
+    if (window.gameResetTimeout) {
+        clearTimeout(window.gameResetTimeout);
+    }
+    
     // Set timeout to reset game state
-    setTimeout(() => {
+    window.gameResetTimeout = setTimeout(() => {
         console.log('Resetting game state');
+        
+        // Clear game over state
         gameOverState = null;
         
         // Remove game over message
@@ -360,16 +400,23 @@ socket.on('game_over', (data) => {
             player.eliminated = false;
             player.dead = false;
             player.invulnerable = false;
+            player.invulnerable_until = 0;
         });
         
         // Re-enable controls
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
         
+        // Clear any existing effects
+        deathEffects.clear();
+        respawnEffects.clear();
+        
+        // Unfreeze the game
+        gameFrozen = false;
+        
+        // Force final update
         updateGame();
     }, 5000);
-    
-    updateGame();
 });
 
 // Add DeathParticle class
@@ -542,6 +589,281 @@ class RespawnParticle {
 // Add respawn effect system
 const respawnEffects = new Map(); // Map of username to their respawn effect
 
+// Add platform configuration
+const platform = {
+    x: 300,  // Position from left
+    y: 400,  // Height from top
+    width: 200,
+    height: 20,
+    color: '#8B4513'  // Brown color for platform
+};
+
+// Add jump physics configuration
+const jumpConfig = {
+    initialVelocity: -15,  // Negative velocity means upward movement
+    gravity: 0.5,          // Gravity strength
+    maxFallSpeed: 10       // Maximum falling speed
+};
+
+// Initialize player with velocity when joining room
+socket.on('player_joined', (data) => {
+    console.log(`${data.username} joined the game`);
+    if (data.username && data.position) {
+        // Initialize velocityY if not present
+        if (!data.position.velocityY) {
+            data.position.velocityY = 0;
+        }
+        gameState.players[data.username] = data.position;
+    }
+    updateGame();
+});
+
+// Add weapon animation configuration
+const weaponConfig = {
+    length: 40,           // Length of the sword
+    width: 8,            // Width of the sword
+    swingDuration: 200,  // Duration of swing animation in ms
+    color: '#C0C0C0',    // Silver color for the sword
+    glowColor: '#4169E1', // Royal blue glow for the swing effect
+    defaultAngle: -Math.PI / 4  // Default sword angle (-45 degrees)
+};
+
+// Track active attack animations
+const attackAnimations = new Map();
+
+class AttackAnimation {
+    constructor(player, startTime, facingLeft) {
+        this.player = player;
+        this.startTime = startTime;
+        this.progress = 0;
+        this.facingLeft = facingLeft;
+    }
+
+    update(currentTime) {
+        const elapsed = currentTime - this.startTime;
+        this.progress = Math.min(elapsed / weaponConfig.swingDuration, 1);
+        return this.progress < 1;
+    }
+
+    draw(ctx) {
+        const player = this.player;
+        
+        ctx.save();
+        ctx.translate(player.x, player.y);
+        
+        if (this.facingLeft) {
+            // When facing left, flip horizontally and animate
+            ctx.scale(-1, 1);
+            const swingAngle = (-Math.PI / 4) + (this.progress * Math.PI / 2);
+            ctx.rotate(swingAngle);
+        } else {
+            // When facing right, just animate
+            const swingAngle = (Math.PI / 4) - (this.progress * Math.PI / 2);
+            ctx.rotate(swingAngle);
+        }
+        
+        // Draw sword handle
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(-5, -5, 10, 10);
+        
+        // Draw sword blade
+        const gradient = ctx.createLinearGradient(0, -weaponConfig.length, 0, 0);
+        gradient.addColorStop(0, weaponConfig.color);
+        gradient.addColorStop(1, '#A0A0A0');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(-weaponConfig.width/2, -weaponConfig.length, weaponConfig.width, weaponConfig.length);
+        
+        // Add swing effect
+        const glowOpacity = Math.sin(this.progress * Math.PI) * 0.6;
+        ctx.strokeStyle = weaponConfig.glowColor;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = glowOpacity;
+        ctx.stroke();
+        
+        // Add motion blur effect
+        ctx.beginPath();
+        ctx.globalAlpha = glowOpacity * 0.3;
+        if (this.facingLeft) {
+            ctx.arc(0, 0, weaponConfig.length, -Math.PI/4, Math.PI/4, false);
+        } else {
+            ctx.arc(0, 0, weaponConfig.length, Math.PI * 5/4, Math.PI * 7/4, false);
+        }
+        ctx.strokeStyle = weaponConfig.glowColor;
+        ctx.stroke();
+        
+        ctx.restore();
+    }
+}
+
+// Update handleInput function to add attack animation
+function handleInput() {
+    if (!gameState.players[currentUsername]) {
+        return;  // Player not yet in game state
+    }
+    
+    const player = gameState.players[currentUsername];
+    let moved = false;
+    
+    // Initialize facing direction if it doesn't exist
+    if (player.facingLeft === undefined) {
+        player.facingLeft = false;
+    }
+    
+    // Move left
+    if (keys['ArrowLeft'] && player.x > 25) {
+        player.x -= 5;
+        player.facingLeft = true;
+        moved = true;
+    }
+    
+    // Move right
+    if (keys['ArrowRight'] && player.x < canvas.width - 25) {
+        player.x += 5;
+        player.facingLeft = false;
+        moved = true;
+    }
+    
+    // Check if player is on platform
+    const onPlatform = (
+        player.y >= platform.y - 25 && // Player bottom touches platform top
+        player.y <= platform.y + 10 && // Small tolerance for landing
+        player.x >= platform.x - 25 && // Player left side is past platform left edge
+        player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
+    );
+    
+    // Check if player is on ground
+    const onGround = player.y >= canvas.height - 100;
+    
+    // Initialize velocityY if it doesn't exist
+    if (player.velocityY === undefined) {
+        player.velocityY = 0;
+    }
+    
+    // Jump (only if on ground or platform)
+    if (keys['Space'] && (onGround || onPlatform)) {
+        player.velocityY = jumpConfig.initialVelocity;
+        moved = true;
+    }
+    
+    // Apply gravity and velocity
+    player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
+    player.y += player.velocityY;
+    
+    // Handle ground collision
+    if (player.y >= canvas.height - 100) {
+        player.y = canvas.height - 100;
+        player.velocityY = 0;
+    }
+    
+    // Handle platform collision
+    if (player.velocityY > 0 && // Moving downward
+        player.y >= platform.y - 25 && // Below platform top
+        player.y <= platform.y + platform.height && // Above platform bottom
+        player.x >= platform.x - 25 && // Right of platform left
+        player.x <= platform.x + platform.width + 25) { // Left of platform right
+        player.y = platform.y - 25;
+        player.velocityY = 0;
+    }
+    
+    // Attack with Z key
+    if (keys['KeyZ']) {
+        // Check if there are players nearby to attack
+        let attacked = false;
+        
+        Object.entries(gameState.players).forEach(([username, otherPlayer]) => {
+            if (username !== currentUsername) {
+                // Simple collision detection - if players are close enough
+                const distance = Math.hypot(player.x - otherPlayer.x, player.y - otherPlayer.y);
+                if (distance < 60) { // Within attack range
+                    socket.emit('player_attack', {
+                        room_id: roomId,
+                        username: currentUsername,
+                        target: username
+                    });
+                    attacked = true;
+                    
+                    // Start attack animation with facing direction
+                    attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+                    
+                    // Set a cooldown on the Z key to prevent spam attacks
+                    keys['KeyZ'] = false;
+                    setTimeout(() => {
+                        if (keys['KeyZ']) keys['KeyZ'] = false;
+                    }, 500); // Half second cooldown
+                }
+            }
+        });
+        
+        // Visual feedback for attack attempt
+        if (!attacked) {
+            // Start attack animation even if no target hit
+            attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+            
+            // Flash the attack area
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 60, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    
+    // Send position update to server if moved
+    if (moved || player.velocityY !== 0) {
+        socket.emit('player_move', {
+            room_id: roomId,
+            username: currentUsername,
+            position: {
+                x: player.x,
+                y: player.y,
+                score: player.score || 0,
+                velocityY: player.velocityY,
+                facingLeft: player.facingLeft
+            }
+        });
+    }
+}
+
+// Update gravity interval to use new physics
+const gravityInterval = setInterval(() => {
+    if (gameState.players[currentUsername]) {
+        const player = gameState.players[currentUsername];
+        
+        // Initialize velocityY if it doesn't exist
+        if (player.velocityY === undefined) {
+            player.velocityY = 0;
+        }
+        
+        // Check if player is on platform
+        const onPlatform = (
+            player.y >= platform.y - 25 && // Player bottom touches platform top
+            player.y <= platform.y + 10 && // Small tolerance for landing
+            player.x >= platform.x - 25 && // Player left side is past platform left edge
+            player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
+        );
+        
+        // Check if player is on ground
+        const onGround = player.y >= canvas.height - 100;
+        
+        // Apply gravity if not on ground and not on platform
+        if (!onGround && !onPlatform) {
+            player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
+            player.y += player.velocityY;
+            
+            // Send updated position to server
+            socket.emit('player_move', {
+                room_id: roomId,
+                username: currentUsername,
+                position: {
+                    x: player.x,
+                    y: player.y,
+                    score: player.score || 0,
+                    velocityY: player.velocityY
+                }
+            });
+        }
+    }
+}, 20);
+
 // Game loop
 function updateGame() {
     // Clear canvas
@@ -550,6 +872,16 @@ function updateGame() {
     // Draw the floor
     ctx.fillStyle = '#666';
     ctx.fillRect(0, 0, canvas.width, canvas.height - 50);
+    
+    // Draw the platform
+    ctx.fillStyle = platform.color;
+    ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+    
+    // Add platform shadow/highlight for 3D effect
+    ctx.fillStyle = '#6B3410'; // Darker brown for shadow
+    ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
+    ctx.fillStyle = '#A0522D'; // Lighter brown for highlight
+    ctx.fillRect(platform.x, platform.y, platform.width, 2);
     
     // Draw all players
     Object.entries(gameState.players).forEach(([username, player]) => {
@@ -572,8 +904,8 @@ function updateGame() {
             });
         }
         
-        // Only draw player if not dead and not waiting for shield
-        if (!player.dead && !player.waitingForShield) {
+        // Only draw player and weapon if not dead and not waiting for shield
+        if (!player.dead && !player.waitingForShield && !player.eliminated) {
             // Draw invulnerability effect if player is invulnerable
             if (player.invulnerable && currentTime < player.invulnerable_until) {
                 // Draw shield circle
@@ -591,59 +923,17 @@ function updateGame() {
                 ctx.fill();
             }
             
-            // Draw player circle with gray overlay for non-winners if game is over
+            // Draw player circle
             ctx.beginPath();
             ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
-            if (gameOverState && username !== gameOverState.winner) {
-                ctx.fillStyle = '#808080'; // Gray color for losers
-            } else {
-                ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
-            }
+            ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
             ctx.fill();
             
-            // Draw crown for winner
-            if (gameOverState && username === gameOverState.winner) {
-                // Draw victory particles around the winner
-                const now = Date.now();
-                const elapsed = now - gameOverState.timestamp;
-                const angle = (elapsed / 500) * Math.PI * 2; // Full rotation every 500ms
-                
-                // Draw rotating golden particles around winner
-                for (let i = 0; i < 12; i++) {
-                    const particleAngle = angle + (i * Math.PI / 6);
-                    const distance = 45 + Math.sin(elapsed / 200) * 5; // Pulsating effect
-                    const x = player.x + Math.cos(particleAngle) * distance;
-                    const y = player.y + Math.sin(particleAngle) * distance;
-                    
-                    ctx.beginPath();
-                    ctx.arc(x, y, 5, 0, Math.PI * 2);
-                    ctx.fillStyle = `hsl(${(i * 30 + elapsed / 50) % 360}, 100%, 50%)`;
-                    ctx.fill();
-                }
-                
-                // Draw crown
-                ctx.font = '32px Arial';
-                ctx.fillStyle = '#FFD700';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'bottom';
-                ctx.fillText('👑', player.x, player.y - 35);
-                
-                // Add golden glow effect around winner
-                const winnerGlow = ctx.createRadialGradient(player.x, player.y, 20, player.x, player.y, 45);
-                winnerGlow.addColorStop(0, 'rgba(255, 215, 0, 0.2)');
-                winnerGlow.addColorStop(1, 'rgba(255, 215, 0, 0)');
-                ctx.fillStyle = winnerGlow;
-                ctx.beginPath();
-                ctx.arc(player.x, player.y, 45, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            
-            // Draw player name and score (grayed out for losers)
-            ctx.fillStyle = gameOverState && username !== gameOverState.winner ? '#808080' : '#fff';
+            // Draw player name and win count
+            ctx.fillStyle = '#fff';
             ctx.font = '16px Arial';
             ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(`${username} (${player.score || 0})`, player.x, player.y - 55);
+            ctx.fillText(`${username} (${gameState.win_counts[username] || 0})`, player.x, player.y - 55);
             
             // Draw hearts for lives
             const lives = player.lives || 3;
@@ -655,8 +945,8 @@ function updateGame() {
                 const heartX = heartsStartX + (i * (heartSize + 5));
                 const heartY = player.y - 40;
                 
-                ctx.fillStyle = gameOverState && username !== gameOverState.winner ? '#808080' : '#ff0000';
-                ctx.strokeStyle = gameOverState && username !== gameOverState.winner ? '#808080' : '#ff0000';
+                ctx.fillStyle = '#ff0000';
+                ctx.strokeStyle = '#ff0000';
                 ctx.lineWidth = 2;
                 
                 ctx.beginPath();
@@ -689,6 +979,44 @@ function updateGame() {
             
             ctx.fillStyle = health > 50 ? '#00ff00' : health > 25 ? '#ffff00' : '#ff0000';
             ctx.fillRect(healthBarX, healthBarY, (health / 100) * healthBarWidth, healthBarHeight);
+            
+            // Draw weapon and attack animation if exists
+            const attackAnim = attackAnimations.get(username);
+            if (attackAnim) {
+                if (!attackAnim.update(Date.now())) {
+                    // Animation finished
+                    attackAnimations.delete(username);
+                } else {
+                    // Draw the animation
+                    attackAnim.draw(ctx);
+                }
+            } else {
+                // Draw default weapon position when not attacking
+                ctx.save();
+                ctx.translate(player.x, player.y);
+                
+                if (player.facingLeft) {
+                    // When facing left, flip horizontally and rotate
+                    ctx.scale(-1, 1);
+                    ctx.rotate(-Math.PI / 4);
+                } else {
+                    // When facing right, just rotate
+                    ctx.rotate(Math.PI / 4);
+                }
+                
+                // Draw sword handle
+                ctx.fillStyle = '#8B4513';
+                ctx.fillRect(-5, -5, 10, 10);
+                
+                // Draw sword blade
+                const gradient = ctx.createLinearGradient(0, -weaponConfig.length, 0, 0);
+                gradient.addColorStop(0, weaponConfig.color);
+                gradient.addColorStop(1, '#A0A0A0');
+                ctx.fillStyle = gradient;
+                ctx.fillRect(-weaponConfig.width/2, -weaponConfig.length, weaponConfig.width, weaponConfig.length);
+                
+                ctx.restore();
+            }
         }
         
         ctx.restore();
@@ -839,6 +1167,7 @@ if (window.location.pathname.includes('/join-room/')) {
         // Update our game state
         gameState.players = state.players || {};
         gameState.max_players = state.max_players || 4;
+        gameState.win_counts = state.win_counts || {}; // Make sure we update win counts from server
         if (state.room_name) {
             gameState.room_name = state.room_name;
             document.querySelector('.game-header h2').textContent = state.room_name;
@@ -853,9 +1182,9 @@ if (window.location.pathname.includes('/join-room/')) {
         // Update players list
         if (playersListElem) {
             playersListElem.innerHTML = Object.keys(gameState.players).map(player => {
-                const score = gameState.players[player].score || 0;
                 const isCurrentPlayer = player === currentUsername;
-                return `<li class="${isCurrentPlayer ? 'current-player' : ''}">${player} (Score: ${score})${isCurrentPlayer ? ' (You)' : ''}</li>`;
+                const winCount = gameState.win_counts[player] || 0;
+                return `<li class="${isCurrentPlayer ? 'current-player' : ''}">${player} (${winCount})${isCurrentPlayer ? ' (You)' : ''}</li>`;
             }).join('');
         }
         
@@ -961,10 +1290,46 @@ if (window.location.pathname.includes('/join-room/')) {
             moved = true;
         }
         
-        // Jump (only if on ground)
-        if (keys['Space'] && player.y >= canvas.height - 100) {
-            player.y -= 20; // Initial jump velocity
+        // Check if player is on platform
+        const onPlatform = (
+            player.y >= platform.y - 25 && // Player bottom touches platform top
+            player.y <= platform.y + 10 && // Small tolerance for landing
+            player.x >= platform.x - 25 && // Player left side is past platform left edge
+            player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
+        );
+        
+        // Check if player is on ground
+        const onGround = player.y >= canvas.height - 100;
+        
+        // Initialize velocityY if it doesn't exist
+        if (player.velocityY === undefined) {
+            player.velocityY = 0;
+        }
+        
+        // Jump (only if on ground or platform)
+        if (keys['Space'] && (onGround || onPlatform)) {
+            player.velocityY = jumpConfig.initialVelocity;
             moved = true;
+        }
+        
+        // Apply gravity and velocity
+        player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
+        player.y += player.velocityY;
+        
+        // Handle ground collision
+        if (player.y >= canvas.height - 100) {
+            player.y = canvas.height - 100;
+            player.velocityY = 0;
+        }
+        
+        // Handle platform collision
+        if (player.velocityY > 0 && // Moving downward
+            player.y >= platform.y - 25 && // Below platform top
+            player.y <= platform.y + platform.height && // Above platform bottom
+            player.x >= platform.x - 25 && // Right of platform left
+            player.x <= platform.x + platform.width + 25) { // Left of platform right
+            player.y = platform.y - 25;
+            player.velocityY = 0;
         }
         
         // Attack with Z key
@@ -984,6 +1349,9 @@ if (window.location.pathname.includes('/join-room/')) {
                         });
                         attacked = true;
                         
+                        // Start attack animation with facing direction
+                        attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+                        
                         // Set a cooldown on the Z key to prevent spam attacks
                         keys['KeyZ'] = false;
                         setTimeout(() => {
@@ -995,6 +1363,9 @@ if (window.location.pathname.includes('/join-room/')) {
             
             // Visual feedback for attack attempt
             if (!attacked) {
+                // Start attack animation even if no target hit
+                attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+                
                 // Flash the attack area
                 ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
                 ctx.beginPath();
@@ -1004,27 +1375,45 @@ if (window.location.pathname.includes('/join-room/')) {
         }
         
         // Send position update to server if moved
-        if (moved) {
+        if (moved || player.velocityY !== 0) {
             socket.emit('player_move', {
                 room_id: roomId,
                 username: currentUsername,
                 position: {
                     x: player.x,
                     y: player.y,
-                    score: player.score || 0
+                    score: player.score || 0,
+                    velocityY: player.velocityY
                 }
             });
         }
     }
     
-    // Apply gravity
+    // Update gravity interval to use new physics
     const gravityInterval = setInterval(() => {
         if (gameState.players[currentUsername]) {
             const player = gameState.players[currentUsername];
             
-            // Apply gravity if not on ground
-            if (player.y < canvas.height - 100) {
-                player.y = Math.min(player.y + 5, canvas.height - 100);
+            // Initialize velocityY if it doesn't exist
+            if (player.velocityY === undefined) {
+                player.velocityY = 0;
+            }
+            
+            // Check if player is on platform
+            const onPlatform = (
+                player.y >= platform.y - 25 && // Player bottom touches platform top
+                player.y <= platform.y + 10 && // Small tolerance for landing
+                player.x >= platform.x - 25 && // Player left side is past platform left edge
+                player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
+            );
+            
+            // Check if player is on ground
+            const onGround = player.y >= canvas.height - 100;
+            
+            // Apply gravity if not on ground and not on platform
+            if (!onGround && !onPlatform) {
+                player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
+                player.y += player.velocityY;
                 
                 // Send updated position to server
                 socket.emit('player_move', {
@@ -1033,7 +1422,8 @@ if (window.location.pathname.includes('/join-room/')) {
                     position: {
                         x: player.x,
                         y: player.y,
-                        score: player.score || 0
+                        score: player.score || 0,
+                        velocityY: player.velocityY
                     }
                 });
             }
@@ -1054,6 +1444,16 @@ if (window.location.pathname.includes('/join-room/')) {
         ctx.fillStyle = '#666';
         ctx.fillRect(0, canvas.height - 50, canvas.width, 50);
         
+        // Draw the platform
+        ctx.fillStyle = platform.color;
+        ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+        
+        // Add platform shadow/highlight for 3D effect
+        ctx.fillStyle = '#6B3410'; // Darker brown for shadow
+        ctx.fillRect(platform.x, platform.y + platform.height - 2, platform.width, 2);
+        ctx.fillStyle = '#A0522D'; // Lighter brown for highlight
+        ctx.fillRect(platform.x, platform.y, platform.width, 2);
+        
         // Draw all players
         Object.entries(gameState.players).forEach(([username, player]) => {
             ctx.save();
@@ -1069,15 +1469,14 @@ if (window.location.pathname.includes('/join-room/')) {
             // Draw death effect if it exists
             const deathEffect = deathEffects.get(username);
             if (deathEffect) {
-                // Draw death particles
                 deathEffect.particles.forEach(particle => {
                     particle.update();
                     particle.draw(ctx);
                 });
             }
             
-            // Draw player and effects if not in death animation
-            if (!player.dead) {
+            // Only draw player and weapon if not dead and not waiting for shield
+            if (!player.dead && !player.waitingForShield && !player.eliminated) {
                 // Draw invulnerability effect if player is invulnerable
                 if (player.invulnerable && currentTime < player.invulnerable_until) {
                     // Draw shield circle
@@ -1093,25 +1492,19 @@ if (window.location.pathname.includes('/join-room/')) {
                     gradient.addColorStop(1, 'rgba(100, 200, 255, 0)');
                     ctx.fillStyle = gradient;
                     ctx.fill();
-                    
-                    // Draw shield timer
-                    const timeLeft = Math.ceil(player.invulnerable_until - currentTime);
-                    ctx.fillStyle = '#64c8ff';
-                    ctx.font = '14px Arial';
-                    ctx.fillText(`Shield: ${timeLeft}s`, player.x, player.y + 40);
                 }
                 
                 // Draw player circle
-                ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
                 ctx.beginPath();
                 ctx.arc(player.x, player.y, 25, 0, Math.PI * 2);
+                ctx.fillStyle = username === currentUsername ? '#4CAF50' : '#f44336';
                 ctx.fill();
                 
-                // Draw player name and score
+                // Draw player name and win count
                 ctx.fillStyle = '#fff';
                 ctx.font = '16px Arial';
                 ctx.textAlign = 'center';
-                ctx.fillText(`${username} (${player.score || 0})`, player.x, player.y - 55);
+                ctx.fillText(`${username} (${gameState.win_counts[username] || 0})`, player.x, player.y - 55);
                 
                 // Draw hearts for lives
                 const lives = player.lives || 3;
@@ -1157,6 +1550,44 @@ if (window.location.pathname.includes('/join-room/')) {
                 
                 ctx.fillStyle = health > 50 ? '#00ff00' : health > 25 ? '#ffff00' : '#ff0000';
                 ctx.fillRect(healthBarX, healthBarY, (health / 100) * healthBarWidth, healthBarHeight);
+                
+                // Draw weapon and attack animation if exists
+                const attackAnim = attackAnimations.get(username);
+                if (attackAnim) {
+                    if (!attackAnim.update(Date.now())) {
+                        // Animation finished
+                        attackAnimations.delete(username);
+                    } else {
+                        // Draw the animation
+                        attackAnim.draw(ctx);
+                    }
+                } else {
+                    // Draw default weapon position when not attacking
+                    ctx.save();
+                    ctx.translate(player.x, player.y);
+                    
+                    if (player.facingLeft) {
+                        // When facing left, flip horizontally and rotate
+                        ctx.scale(-1, 1);
+                        ctx.rotate(-Math.PI / 4);
+                    } else {
+                        // When facing right, just rotate
+                        ctx.rotate(Math.PI / 4);
+                    }
+                    
+                    // Draw sword handle
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(-5, -5, 10, 10);
+                    
+                    // Draw sword blade
+                    const gradient = ctx.createLinearGradient(0, -weaponConfig.length, 0, 0);
+                    gradient.addColorStop(0, weaponConfig.color);
+                    gradient.addColorStop(1, '#A0A0A0');
+                    ctx.fillStyle = gradient;
+                    ctx.fillRect(-weaponConfig.width/2, -weaponConfig.length, weaponConfig.width, weaponConfig.length);
+                    
+                    ctx.restore();
+                }
             }
             
             ctx.restore();
@@ -1165,7 +1596,9 @@ if (window.location.pathname.includes('/join-room/')) {
     
     // Game loop
     function gameLoop() {
-        handleInput();
+        if (!gameFrozen) {
+            handleInput();
+        }
         updateGame();
         requestAnimationFrame(gameLoop);
     }
@@ -1252,3 +1685,31 @@ if (window.location.pathname.includes('/join-room/')) {
     }
 }
 // --- END GAME ROOM LOGIC ---
+
+// Add handler for game reset
+socket.on('game_reset', () => {
+    console.log('Receiving game reset');
+    
+    // Clear game over state
+    gameOverState = null;
+    
+    // Remove game over message
+    if (gameOverMessage && gameOverMessage.parentNode) {
+        gameOverMessage.parentNode.removeChild(gameOverMessage);
+        gameOverMessage = null;
+    }
+    
+    // Clear any existing effects
+    deathEffects.clear();
+    respawnEffects.clear();
+    
+    // Re-enable controls
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    
+    // Unfreeze the game
+    gameFrozen = false;
+    
+    // Force final update
+    updateGame();
+});

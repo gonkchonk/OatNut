@@ -166,7 +166,8 @@ def handle_join_room(data):
         if room_id not in game_states:
             game_states[room_id] = {
                 'players': {},
-                'active': True
+                'active': True,
+                'win_counts': {}
             }
         
         # Initialize player position
@@ -184,6 +185,9 @@ def handle_join_room(data):
                 'invulnerable': False,
                 'invulnerable_until': 0
             }
+            # Initialize win count if not exists
+            if username not in game_states[room_id]['win_counts']:
+                game_states[room_id]['win_counts'][username] = 0
         
         # Update player list in database
         db.rooms.update_one(
@@ -198,9 +202,7 @@ def handle_join_room(data):
         # Broadcast the updated game state to all players in the room
         room_data = {
             'players': game_states[room_id]['players'],
-            'player_count': len(game_states[room_id]['players']),
-            'max_players': max_players,
-            'room_name': room.get('name', 'Game Room') if room else 'Game Room'
+            'win_counts': game_states[room_id]['win_counts']
         }
         
         # Emit to the specific client first
@@ -224,6 +226,23 @@ def handle_join_room(data):
         app.logger.error(f"Error in handle_join_room: {str(e)}", exc_info=True)
         emit('error', {'message': f'Error joining room: {str(e)}'})
 
+@socketio.on('game_state')
+def handle_game_state(data):
+    try:
+        room_id = data['room_id']
+        if room_id in game_states:
+            # Get room details from database
+            room = db.rooms.find_one({"_id": ObjectId(room_id)})
+            max_players = room.get('max_players', 4) if room else 4
+            
+            # Broadcast updated game state including win counts
+            socketio.emit('game_state', {
+                'players': game_states[room_id]['players'],
+                'win_counts': game_states[room_id]['win_counts']
+            }, room=room_id)
+    except Exception as e:
+        app.logger.error(f"Error in handle_game_state: {str(e)}")
+
 @socketio.on('player_move')
 def handle_player_move(data):
     try:
@@ -239,11 +258,12 @@ def handle_player_move(data):
             room = db.rooms.find_one({"_id": ObjectId(room_id)})
             max_players = room.get('max_players', 4) if room else 4
             
-            # Broadcast updated game state
+            # Broadcast updated game state including win counts
             socketio.emit('game_state', {
                 'players': game_states[room_id]['players'],
                 'player_count': len(game_states[room_id]['players']),
-                'max_players': max_players
+                'max_players': max_players,
+                'win_counts': game_states[room_id]['win_counts']
             }, room=room_id)
     except Exception as e:
         app.logger.error(f"Error in handle_player_move: {str(e)}")
@@ -322,23 +342,42 @@ def handle_player_attack(data):
                         winner = next(username for username, p in game_states[room_id]['players'].items() 
                                    if not p.get('eliminated', False) and p.get('lives', 0) > 0)
                         
+                        # Increment win count for the winner in this room
+                        game_states[room_id]['win_counts'][winner] = game_states[room_id]['win_counts'].get(winner, 0) + 1
+                        
+                        app.logger.info(f"Player {winner} won the game. New win count: {game_states[room_id]['win_counts'][winner]}")
+                        
+                        # Send game over with updated win counts
                         socketio.emit('game_over', {
                             'winner': winner,
-                            'finalLives': {player: p['lives'] for player, p in game_states[room_id]['players'].items()}
+                            'finalLives': {player: p['lives'] for player, p in game_states[room_id]['players'].items()},
+                            'win_counts': game_states[room_id]['win_counts']
                         }, room=room_id)
                         
-                        # Reset game state
-                        for player in game_states[room_id]['players'].values():
-                            player['lives'] = 3
-                            player['health'] = 100
-                            player['eliminated'] = False
-                            player['dead'] = False
-                            player['invulnerable'] = False
-                            player['invulnerable_until'] = 0
+                        # Schedule the reset
+                        def reset_game():
+                            socketio.sleep(5)  # Wait 5 seconds
+                            if room_id in game_states:  # Check if room still exists
+                                # Reset all players
+                                for player in game_states[room_id]['players'].values():
+                                    player['lives'] = 3
+                                    player['health'] = 100
+                                    player['eliminated'] = False
+                                    player['dead'] = False
+                                    player['invulnerable'] = False
+                                    player['invulnerable_until'] = 0
+                                
+                                # Send reset signal to clients
+                                socketio.emit('game_reset', room=room_id)
+                                
+                                # Send updated game state
+                                socketio.emit('game_state', {
+                                    'players': game_states[room_id]['players'],
+                                    'win_counts': game_states[room_id]['win_counts']
+                                }, room=room_id)
                         
-                        socketio.emit('game_state', {
-                            'players': game_states[room_id]['players']
-                        }, room=room_id)
+                        # Start the reset task
+                        socketio.start_background_task(reset_game)
                 else:
                     # Schedule respawn if player has lives remaining
                     def respawn_player():
