@@ -186,7 +186,24 @@ socket.on('game_state', (state) => {
 socket.on('player_health_update', (data) => {
     const { username, health } = data;
     if (gameState.players[username]) {
+        // Check if this was a hit
+        const prevHealth = gameState.players[username].health || 100;
         gameState.players[username].health = health;
+        
+        // If health decreased, play hit sound
+        if (health < prevHealth) {
+            try {
+                // Play hit sound if this player was hit
+                if (username === currentUsername) {
+                    hitSound.currentTime = 0;
+                    hitSound.volume = 0.3;
+                    hitSound.play().catch(e => console.error('Error playing hit sound:', e));
+                }
+            } catch (error) {
+                console.error('Error with hit sound:', error);
+            }
+        }
+        
         updateGame();
     }
 });
@@ -213,6 +230,15 @@ socket.on('player_eliminated', (data) => {
             isElimination: true
         });
         
+        // Play elimination sound
+        try {
+            eliminationSound.currentTime = 0;
+            eliminationSound.volume = 0.4;
+            eliminationSound.play().catch(e => console.error('Error playing elimination sound:', e));
+        } catch (error) {
+            console.error('Error with elimination sound:', error);
+        }
+        
         // If this is the current player, disable controls
         if (username === currentUsername) {
             window.removeEventListener('keydown', handleKeyDown);
@@ -225,6 +251,15 @@ socket.on('player_eliminated', (data) => {
 
 // Add game over state tracking
 let gameOverState = null;
+let gameOverMessage = null;
+// Create victory sound
+const victorySound = new Audio('https://cdn.freesound.org/previews/270/270402_5123851-lq.mp3');
+// Create elimination sound
+const eliminationSound = new Audio('https://cdn.freesound.org/previews/476/476178_9242326-lq.mp3');
+// Create attack sound
+const attackSound = new Audio('https://cdn.freesound.org/previews/350/350985_6456158-lq.mp3');
+// Create hit sound
+const hitSound = new Audio('https://cdn.freesound.org/previews/391/391961_7416345-lq.mp3');
 
 // Update game over handler
 socket.on('game_over', (data) => {
@@ -248,6 +283,59 @@ socket.on('game_over', (data) => {
         timestamp: Date.now()
     };
     
+    // Play victory sound
+    try {
+        // Reset sound to beginning in case it was played before
+        victorySound.currentTime = 0;
+        victorySound.volume = 0.5;
+        // Play the victory fanfare
+        victorySound.play().catch(e => console.error('Error playing victory sound:', e));
+        
+        // If current player is the winner, play at higher volume
+        if (winner === currentUsername) {
+            victorySound.volume = 0.7;
+        }
+    } catch (error) {
+        console.error('Error with victory sound:', error);
+    }
+    
+    // Create game over message overlay
+    if (!gameOverMessage) {
+        gameOverMessage = document.createElement('div');
+        gameOverMessage.className = 'game-over-message';
+        gameOverMessage.style.position = 'absolute';
+        gameOverMessage.style.top = '50%';
+        gameOverMessage.style.left = '50%';
+        gameOverMessage.style.transform = 'translate(-50%, -50%)';
+        gameOverMessage.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+        gameOverMessage.style.color = '#fff';
+        gameOverMessage.style.padding = '30px';
+        gameOverMessage.style.borderRadius = '10px';
+        gameOverMessage.style.textAlign = 'center';
+        gameOverMessage.style.zIndex = '100';
+        gameOverMessage.style.boxShadow = '0 0 20px rgba(255, 215, 0, 0.6)';
+        gameOverMessage.style.border = '2px solid #FFD700';
+        gameOverMessage.style.minWidth = '300px';
+        
+        const winnerIsYou = winner === currentUsername;
+        
+        gameOverMessage.innerHTML = `
+            <h2 style="margin-top: 0; color: #FFD700; font-size: 32px;">GAME OVER</h2>
+            <div style="margin: 20px 0; font-size: 24px;">
+                ${winnerIsYou ? 'YOU WIN! 🎉' : `${winner} WINS! 👑`}
+            </div>
+            <div style="margin: 10px 0 20px 0; font-size: 18px;">
+                ${winnerIsYou ? 'Congratulations!' : 'Better luck next time!'}
+            </div>
+            <div style="font-size: 14px; opacity: 0.8; margin-top: 20px;">
+                Game restarting in 5 seconds...
+            </div>
+        `;
+        
+        // Add to game section
+        document.getElementById('game-section').appendChild(gameOverMessage);
+    }
+    
     console.log('Setting game over state:', gameOverState);
     
     // Disable controls
@@ -258,6 +346,12 @@ socket.on('game_over', (data) => {
     setTimeout(() => {
         console.log('Resetting game state');
         gameOverState = null;
+        
+        // Remove game over message
+        if (gameOverMessage && gameOverMessage.parentNode) {
+            gameOverMessage.parentNode.removeChild(gameOverMessage);
+            gameOverMessage = null;
+        }
         
         // Reset all players
         Object.values(gameState.players).forEach(player => {
@@ -509,6 +603,25 @@ function updateGame() {
             
             // Draw crown for winner
             if (gameOverState && username === gameOverState.winner) {
+                // Draw victory particles around the winner
+                const now = Date.now();
+                const elapsed = now - gameOverState.timestamp;
+                const angle = (elapsed / 500) * Math.PI * 2; // Full rotation every 500ms
+                
+                // Draw rotating golden particles around winner
+                for (let i = 0; i < 12; i++) {
+                    const particleAngle = angle + (i * Math.PI / 6);
+                    const distance = 45 + Math.sin(elapsed / 200) * 5; // Pulsating effect
+                    const x = player.x + Math.cos(particleAngle) * distance;
+                    const y = player.y + Math.sin(particleAngle) * distance;
+                    
+                    ctx.beginPath();
+                    ctx.arc(x, y, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = `hsl(${(i * 30 + elapsed / 50) % 360}, 100%, 50%)`;
+                    ctx.fill();
+                }
+                
+                // Draw crown
                 ctx.font = '32px Arial';
                 ctx.fillStyle = '#FFD700';
                 ctx.textAlign = 'center';
@@ -564,7 +677,7 @@ function updateGame() {
                 ctx.stroke();
             }
             
-            // Draw health bar (grayed out for losers)
+            // Draw health bar
             const health = player.health || 100;
             const healthBarWidth = 50;
             const healthBarHeight = 5;
@@ -574,18 +687,14 @@ function updateGame() {
             ctx.fillStyle = '#333';
             ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
             
-            if (gameOverState && username !== gameOverState.winner) {
-                ctx.fillStyle = '#808080';
-            } else {
-                ctx.fillStyle = health > 50 ? '#00ff00' : health > 25 ? '#ffff00' : '#ff0000';
-            }
+            ctx.fillStyle = health > 50 ? '#00ff00' : health > 25 ? '#ffff00' : '#ff0000';
             ctx.fillRect(healthBarX, healthBarY, (health / 100) * healthBarWidth, healthBarHeight);
         }
         
         ctx.restore();
     });
     
-    // Request next frame if game is over to keep animations smooth
+    // If game is over, request animation frame to keep effects running
     if (gameOverState) {
         requestAnimationFrame(updateGame);
     }
@@ -628,6 +737,15 @@ function handleAttack() {
     });
     
     if (closestPlayer && minDistance <= 100) {
+        // Play attack sound
+        try {
+            attackSound.currentTime = 0;
+            attackSound.volume = 0.3;
+            attackSound.play().catch(e => console.error('Error playing attack sound:', e));
+        } catch (error) {
+            console.error('Error with attack sound:', error);
+        }
+        
         socket.emit('player_attack', {
             room_id: roomId,
             username: currentUsername,
@@ -1080,6 +1198,56 @@ if (window.location.pathname.includes('/join-room/')) {
                     window.location.href = '/lobby';
                 }
             }, 3000);
+        });
+    }
+    
+    // Sound management
+    let soundsEnabled = true;
+    const muteBtn = document.getElementById('mute-btn');
+    
+    if (muteBtn) {
+        // Check if mute preference is stored in localStorage
+        const savedMutePreference = localStorage.getItem('gameSoundsMuted');
+        if (savedMutePreference === 'true') {
+            soundsEnabled = false;
+            muteBtn.textContent = '🔇';
+            muteBtn.classList.add('muted');
+            muteBtn.title = 'Unmute Sounds';
+            
+            // Mute all sounds
+            victorySound.muted = true;
+            eliminationSound.muted = true;
+            attackSound.muted = true;
+            hitSound.muted = true;
+        }
+        
+        muteBtn.addEventListener('click', () => {
+            soundsEnabled = !soundsEnabled;
+            
+            if (soundsEnabled) {
+                muteBtn.textContent = '🔊';
+                muteBtn.classList.remove('muted');
+                muteBtn.title = 'Mute Sounds';
+                
+                // Unmute all sounds
+                victorySound.muted = false;
+                eliminationSound.muted = false;
+                attackSound.muted = false;
+                hitSound.muted = false;
+            } else {
+                muteBtn.textContent = '🔇';
+                muteBtn.classList.add('muted');
+                muteBtn.title = 'Unmute Sounds';
+                
+                // Mute all sounds
+                victorySound.muted = true;
+                eliminationSound.muted = true;
+                attackSound.muted = true;
+                hitSound.muted = true;
+            }
+            
+            // Save preference to localStorage
+            localStorage.setItem('gameSoundsMuted', !soundsEnabled);
         });
     }
 }

@@ -12,6 +12,7 @@
             <h2>{{ room.name }}</h2>
             <div>
                 <span>Players: <span id="player-count">{{ room.players|length }}/{{ room.max_players }}</span></span>
+                <button id="mute-btn" title="Toggle Sound">🔊</button>
                 <button id="leave-room-btn">Leave Room</button>
             </div>
         </div>
@@ -27,7 +28,17 @@
                 <p>Arrow keys to move left/right</p>
                 <p>Space to jump</p>
                 <p>Z to attack nearby players</p>
-                <p>First to 5 points wins!</p>
+                <p>Last player standing wins!</p>
+            </div>
+            <div class="game-rules">
+                <h3>Game Rules</h3>
+                <ul style="padding-left: 20px; margin: 5px 0;">
+                    <li>Each player has 3 lives</li>
+                    <li>Attack reduces opponent's health</li>
+                    <li>When health reaches 0, you lose a life</li>
+                    <li>After respawn, you're invulnerable for a short time</li>
+                    <li>Last player with lives remaining wins!</li>
+                </ul>
             </div>
             <div class="player-list">
                 <h3>Players</h3>

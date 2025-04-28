@@ -58,9 +58,19 @@ body {
     border-radius: 8px;
 }
 
-.controls-info, .player-list {
+.controls-info, .game-rules, .player-list {
     flex: 1;
     padding: 10px;
+}
+
+.game-rules ul {
+    margin-bottom: 10px;
+}
+
+.game-rules li {
+    margin-bottom: 6px;
+    font-size: 14px;
+    color: #e0e0e0;
 }
 
 #players {
@@ -75,18 +85,41 @@ body {
     border-radius: 4px;
 }
 
-#leave-room-btn {
+#players li.current-player {
+    background-color: #4CAF50;
+    font-weight: bold;
+}
+
+#leave-room-btn, #mute-btn {
     padding: 8px 16px;
-    background-color: #f44336;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     transition: background-color 0.3s;
+    margin-left: 10px;
+}
+
+#leave-room-btn {
+    background-color: #f44336;
 }
 
 #leave-room-btn:hover {
     background-color: #d32f2f;
+}
+
+#mute-btn {
+    background-color: #2196F3;
+    font-size: 18px;
+    padding: 8px 12px;
+}
+
+#mute-btn:hover {
+    background-color: #0b7dda;
+}
+
+#mute-btn.muted {
+    background-color: #607D8B;
 }
 
 .section {
@@ -145,6 +178,26 @@ button:hover {
 
 .hidden {
     display: none !important;
+}
+
+/* Game Over Message Styles */
+.game-over-message {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+    to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.6); }
+    50% { box-shadow: 0 0 25px rgba(255, 215, 0, 0.8); }
+    100% { box-shadow: 0 0 15px rgba(255, 215, 0, 0.6); }
+}
+
+.game-over-message {
+    animation: fadeIn 0.5s ease-in-out, pulse 2s infinite;
 }
 
 /* Lobby Styles */
