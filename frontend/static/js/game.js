@@ -598,25 +598,192 @@ const platform = {
     color: '#8B4513'  // Brown color for platform
 };
 
-// Add jump physics configuration
+// Update physics configuration
 const jumpConfig = {
-    initialVelocity: -15,  // Negative velocity means upward movement
-    gravity: 0.5,          // Gravity strength
-    maxFallSpeed: 10       // Maximum falling speed
+    initialVelocity: -15,
+    gravity: 0.5,
+    maxFallSpeed: 10,
+    moveSpeed: 7,     // Base movement speed
+    airControl: 0.7,  // Multiplier for air movement (70% control in air)
+    friction: 0.85    // Ground friction
 };
 
-// Initialize player with velocity when joining room
-socket.on('player_joined', (data) => {
-    console.log(`${data.username} joined the game`);
-    if (data.username && data.position) {
-        // Initialize velocityY if not present
-        if (!data.position.velocityY) {
-            data.position.velocityY = 0;
-        }
-        gameState.players[data.username] = data.position;
+// Add horizontal velocity to player state
+function handleInput() {
+    if (!gameState.players[currentUsername]) {
+        return;
     }
-    updateGame();
-});
+    
+    const player = gameState.players[currentUsername];
+    let moved = false;
+    
+    // Initialize velocities if they don't exist
+    if (player.velocityY === undefined) player.velocityY = 0;
+    if (player.velocityX === undefined) player.velocityX = 0;
+    
+    // Check if player is on platform
+    const onPlatform = (
+        player.y >= platform.y - 25 &&
+        player.y <= platform.y + 10 &&
+        player.x >= platform.x - 25 &&
+        player.x <= platform.x + platform.width + 25
+    );
+    
+    // Check if player is on ground
+    const onGround = player.y >= canvas.height - 100;
+    const isGrounded = onGround || onPlatform;
+    
+    // Initialize facing direction if it doesn't exist
+    if (player.facingLeft === undefined) {
+        player.facingLeft = false;
+    }
+    
+    // Calculate target velocity based on input
+    let targetVelocityX = 0;
+    if (keys['ArrowLeft']) {
+        targetVelocityX = -jumpConfig.moveSpeed;
+        player.facingLeft = true;
+        moved = true;
+    }
+    if (keys['ArrowRight']) {
+        targetVelocityX = jumpConfig.moveSpeed;
+        player.facingLeft = false;
+        moved = true;
+    }
+    
+    // Apply air control or ground movement
+    if (isGrounded) {
+        // On ground - direct control
+        player.velocityX = targetVelocityX;
+    } else {
+        // In air - reduced control
+        player.velocityX = player.velocityX * jumpConfig.friction + targetVelocityX * jumpConfig.airControl;
+    }
+    
+    // Apply friction when no input
+    if (targetVelocityX === 0 && isGrounded) {
+        player.velocityX *= jumpConfig.friction;
+    }
+    
+    // Update position based on velocity
+    player.x += player.velocityX;
+    
+    // Constrain to screen bounds
+    player.x = Math.max(25, Math.min(canvas.width - 25, player.x));
+    
+    // Handle jumping
+    if (keys['Space'] && isGrounded) {
+        player.velocityY = jumpConfig.initialVelocity;
+        moved = true;
+    }
+    
+    // Apply gravity
+    player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
+    player.y += player.velocityY;
+    
+    // Handle ground collision
+    if (player.y >= canvas.height - 100) {
+        player.y = canvas.height - 100;
+        player.velocityY = 0;
+    }
+    
+    // Handle platform collision
+    if (player.velocityY > 0 && // Moving downward
+        player.y >= platform.y - 25 &&
+        player.y <= platform.y + platform.height &&
+        player.x >= platform.x - 25 &&
+        player.x <= platform.x + platform.width + 25) {
+        player.y = platform.y - 25;
+        player.velocityY = 0;
+    }
+    
+    // Attack handling (keep existing attack code)
+    if (keys['KeyZ']) {
+        // Check if there are players nearby to attack
+        let attacked = false;
+        
+        Object.entries(gameState.players).forEach(([username, otherPlayer]) => {
+            if (username !== currentUsername) {
+                // Simple collision detection - if players are close enough
+                const distance = Math.hypot(player.x - otherPlayer.x, player.y - otherPlayer.y);
+                if (distance < 60) { // Within attack range
+                    socket.emit('player_attack', {
+                        room_id: roomId,
+                        username: currentUsername,
+                        target: username
+                    });
+                    attacked = true;
+                    
+                    // Start attack animation with facing direction
+                    attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+                    
+                    // Set a cooldown on the Z key to prevent spam attacks
+                    keys['KeyZ'] = false;
+                    setTimeout(() => {
+                        if (keys['KeyZ']) keys['KeyZ'] = false;
+                    }, 500); // Half second cooldown
+                }
+            }
+        });
+        
+        // Visual feedback for attack attempt
+        if (!attacked) {
+            // Start attack animation even if no target hit
+            attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
+            
+            // Flash the attack area
+            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 60, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    
+    // Send position update to server if moved or has velocity
+    if (moved || Math.abs(player.velocityX) > 0.1 || Math.abs(player.velocityY) > 0.1) {
+        socket.emit('player_move', {
+            room_id: roomId,
+            username: currentUsername,
+            position: {
+                x: player.x,
+                y: player.y,
+                score: player.score || 0,
+                velocityX: player.velocityX,
+                velocityY: player.velocityY,
+                facingLeft: player.facingLeft
+            }
+        });
+    }
+}
+
+// Update the game loop to run at a fixed time step
+const FRAME_RATE = 60;
+const FRAME_DELAY = 1000 / FRAME_RATE;
+let lastFrameTime = 0;
+
+function gameLoop(timestamp) {
+    if (!lastFrameTime) lastFrameTime = timestamp;
+    
+    const elapsed = timestamp - lastFrameTime;
+    
+    if (elapsed >= FRAME_DELAY) {
+        if (!gameFrozen) {
+            handleInput();
+        }
+        updateGame();
+        lastFrameTime = timestamp;
+    }
+    
+    requestAnimationFrame(gameLoop);
+}
+
+// Start the game loop with requestAnimationFrame
+requestAnimationFrame(gameLoop);
+
+// Remove the old gravity interval since it's now handled in handleInput
+if (typeof gravityInterval !== 'undefined') {
+    clearInterval(gravityInterval);
+}
 
 // Add weapon animation configuration
 const weaponConfig = {
@@ -694,175 +861,6 @@ class AttackAnimation {
         ctx.restore();
     }
 }
-
-// Update handleInput function to add attack animation
-function handleInput() {
-    if (!gameState.players[currentUsername]) {
-        return;  // Player not yet in game state
-    }
-    
-    const player = gameState.players[currentUsername];
-    let moved = false;
-    
-    // Initialize facing direction if it doesn't exist
-    if (player.facingLeft === undefined) {
-        player.facingLeft = false;
-    }
-    
-    // Move left
-    if (keys['ArrowLeft'] && player.x > 25) {
-        player.x -= 5;
-        player.facingLeft = true;
-        moved = true;
-    }
-    
-    // Move right
-    if (keys['ArrowRight'] && player.x < canvas.width - 25) {
-        player.x += 5;
-        player.facingLeft = false;
-        moved = true;
-    }
-    
-    // Check if player is on platform
-    const onPlatform = (
-        player.y >= platform.y - 25 && // Player bottom touches platform top
-        player.y <= platform.y + 10 && // Small tolerance for landing
-        player.x >= platform.x - 25 && // Player left side is past platform left edge
-        player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
-    );
-    
-    // Check if player is on ground
-    const onGround = player.y >= canvas.height - 100;
-    
-    // Initialize velocityY if it doesn't exist
-    if (player.velocityY === undefined) {
-        player.velocityY = 0;
-    }
-    
-    // Jump (only if on ground or platform)
-    if (keys['Space'] && (onGround || onPlatform)) {
-        player.velocityY = jumpConfig.initialVelocity;
-        moved = true;
-    }
-    
-    // Apply gravity and velocity
-    player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
-    player.y += player.velocityY;
-    
-    // Handle ground collision
-    if (player.y >= canvas.height - 100) {
-        player.y = canvas.height - 100;
-        player.velocityY = 0;
-    }
-    
-    // Handle platform collision
-    if (player.velocityY > 0 && // Moving downward
-        player.y >= platform.y - 25 && // Below platform top
-        player.y <= platform.y + platform.height && // Above platform bottom
-        player.x >= platform.x - 25 && // Right of platform left
-        player.x <= platform.x + platform.width + 25) { // Left of platform right
-        player.y = platform.y - 25;
-        player.velocityY = 0;
-    }
-    
-    // Attack with Z key
-    if (keys['KeyZ']) {
-        // Check if there are players nearby to attack
-        let attacked = false;
-        
-        Object.entries(gameState.players).forEach(([username, otherPlayer]) => {
-            if (username !== currentUsername) {
-                // Simple collision detection - if players are close enough
-                const distance = Math.hypot(player.x - otherPlayer.x, player.y - otherPlayer.y);
-                if (distance < 60) { // Within attack range
-                    socket.emit('player_attack', {
-                        room_id: roomId,
-                        username: currentUsername,
-                        target: username
-                    });
-                    attacked = true;
-                    
-                    // Start attack animation with facing direction
-                    attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
-                    
-                    // Set a cooldown on the Z key to prevent spam attacks
-                    keys['KeyZ'] = false;
-                    setTimeout(() => {
-                        if (keys['KeyZ']) keys['KeyZ'] = false;
-                    }, 500); // Half second cooldown
-                }
-            }
-        });
-        
-        // Visual feedback for attack attempt
-        if (!attacked) {
-            // Start attack animation even if no target hit
-            attackAnimations.set(currentUsername, new AttackAnimation(player, Date.now(), player.facingLeft));
-            
-            // Flash the attack area
-            ctx.fillStyle = 'rgba(255, 255, 0, 0.3)';
-            ctx.beginPath();
-            ctx.arc(player.x, player.y, 60, 0, Math.PI * 2);
-            ctx.fill();
-        }
-    }
-    
-    // Send position update to server if moved
-    if (moved || player.velocityY !== 0) {
-        socket.emit('player_move', {
-            room_id: roomId,
-            username: currentUsername,
-            position: {
-                x: player.x,
-                y: player.y,
-                score: player.score || 0,
-                velocityY: player.velocityY,
-                facingLeft: player.facingLeft
-            }
-        });
-    }
-}
-
-// Update gravity interval to use new physics
-const gravityInterval = setInterval(() => {
-    if (gameState.players[currentUsername]) {
-        const player = gameState.players[currentUsername];
-        
-        // Initialize velocityY if it doesn't exist
-        if (player.velocityY === undefined) {
-            player.velocityY = 0;
-        }
-        
-        // Check if player is on platform
-        const onPlatform = (
-            player.y >= platform.y - 25 && // Player bottom touches platform top
-            player.y <= platform.y + 10 && // Small tolerance for landing
-            player.x >= platform.x - 25 && // Player left side is past platform left edge
-            player.x <= platform.x + platform.width + 25 // Player right side is before platform right edge
-        );
-        
-        // Check if player is on ground
-        const onGround = player.y >= canvas.height - 100;
-        
-        // Apply gravity if not on ground and not on platform
-        if (!onGround && !onPlatform) {
-            player.velocityY = Math.min(player.velocityY + jumpConfig.gravity, jumpConfig.maxFallSpeed);
-            player.y += player.velocityY;
-            
-            // Send updated position to server
-            socket.emit('player_move', {
-                room_id: roomId,
-                username: currentUsername,
-                position: {
-                    x: player.x,
-                    y: player.y,
-                    score: player.score || 0,
-                    velocityY: player.velocityY
-                }
-            });
-        }
-    }
-}, 20);
 
 // Game loop
 function updateGame() {
