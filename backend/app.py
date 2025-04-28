@@ -810,7 +810,7 @@ def create_room():
             "players": [current_user.username],
             "max_players": max_players,
             "creator": current_user.username,
-            "created_at": datetime.datetime.now()
+            "created_at": datetime.now()
         }).inserted_id
         
         app.logger.info(f"Room created: {room_id}")
