@@ -54,16 +54,6 @@
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
-
-        <!-- Protocol-aware Socket.IO init -->
-        <script>
-            const SCHEME = location.protocol === 'https:' ? 'wss' : 'ws';
-            window.socket = io(`${SCHEME}://${location.host}`);
-            socket.on('connect', () => {
-              console.log('Connected via', SCHEME);
-            });
-          </script>
-          
     <script>
         // Store the room ID and current username for use in game.js
         const roomId = "{{ room_id }}";

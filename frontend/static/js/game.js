@@ -194,17 +194,6 @@ socket.on('game_state', (state) => {
     updateGame();
 });
 
-
-socket.on('player_move_batch', deltas => {
-    // deltas is { username: { x, y }, … }
-    Object.entries(deltas).forEach(([user, pos]) => {
-      if (gameState.players[user]) {
-        gameState.players[user].x = pos.x;
-        gameState.players[user].y = pos.y;
-      }
-    });
-  });
-
 // Add health update handler
 socket.on('player_health_update', (data) => {
     const { username, health } = data;
@@ -647,9 +636,6 @@ const GROUND_HEIGHT = 50;
 const PLAYER_RADIUS = 25;
 const FLOOR_Y = canvas.height - GROUND_HEIGHT;
 
-let lastMoveEmit = 0;
-const MOVE_EMIT_INTERVAL = 50; // ms → 20 Hz
-
 // Update handleInput function to work with multiple platforms
 function handleInput() {
     if (!gameState.players[currentUsername]) {
@@ -786,16 +772,19 @@ function handleInput() {
     
     // Send position update to server if moved or has velocity
     if (moved || Math.abs(player.velocityX) > 0.1 || Math.abs(player.velocityY) > 0.1) {
-        const now = Date.now();
-        if (now - lastMoveEmit >= MOVE_EMIT_INTERVAL) {
-          socket.emit('player_move', {
+        socket.emit('player_move', {
             room_id: roomId,
             username: currentUsername,
-            position: { x: player.x, y: player.y }
-          });
-          lastMoveEmit = now;
-        }
-      }
+            position: {
+                x: player.x,
+                y: player.y,
+                score: player.score || 0,
+                velocityX: player.velocityX,
+                velocityY: player.velocityY,
+                facingLeft: player.facingLeft
+            }
+        });
+    }
 }
 
 // Update the game loop to run at a fixed time step
