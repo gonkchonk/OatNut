@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, redirect, url_for, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session, g
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from pymongo import MongoClient
@@ -597,14 +597,6 @@ except Exception as e:
 # from sockets.game_handlers import init_socket_handlers
 # init_socket_handlers(socketio, db)
 
-@app.before_request
-def log_request():
-    ip = request.remote_addr or '-'
-    method = request.method
-    path = request.path
-    # Include IP in the log record
-    app.logger.info(f"{method} {path}", extra={'ip': ip})
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -614,41 +606,30 @@ def register():
     try:
         data = request.json
         if not data:
-            app.logger.error("No JSON data in register request")
+            app.logger.warning(f"Registration failed: No JSON data in request")
             return jsonify({"success": False, "message": "Invalid request format"}), 400
-            
         username = data.get('username')
         password = data.get('password')
-        
         if not username or not password:
-            app.logger.error("Missing username or password in register request")
+            app.logger.warning(f"Registration failed: Missing username or password (username={username})")
             return jsonify({"success": False, "message": "Username and password are required"}), 400
-        
-        # Check if username exists
         if db.users.find_one({"username": username}):
             app.logger.warning(f"Registration failed: Username {username} already exists")
             return jsonify({"success": False, "message": "Username already exists"}), 400
-        
-        # Hash the password
         try:
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         except Exception as e:
-            app.logger.error(f"Password hashing error: {str(e)}")
+            app.logger.error(f"Registration failed: Password hashing error for {username}: {str(e)}")
             return jsonify({"success": False, "message": "Registration error"}), 500
-        
-        # Create user
         user_id = db.users.insert_one({
             "username": username,
             "password": hashed_password
         }).inserted_id
-        
-        # Generate auth token
         token = create_authtoken(str(user_id))
-        
-        app.logger.info(f"User {username} registered successfully")
+        app.logger.info(f"Registration success: {username}")
         return jsonify({"success": True, "token": token, "username": username}), 201
     except Exception as e:
-        app.logger.error(f"Registration error: {str(e)}", exc_info=True)
+        app.logger.error(f"Registration failed: {str(e)}")
         return jsonify({"success": False, "message": "Registration failed, please try again"}), 500
 
 @socketio.on('connect')
@@ -696,57 +677,45 @@ def get_active_users():
 def login():
     if request.method == 'GET':
         return render_template('index.html')
-    
     try:
         data = request.json
         if not data:
-            app.logger.error("No JSON data in login request")
+            app.logger.warning(f"Login failed: No JSON data in request")
             return jsonify({"success": False, "message": "Invalid request format"}), 400
-            
         username = data.get('username')
         password = data.get('password')
-        
         if not username or not password:
-            app.logger.error("Missing username or password in login request")
+            app.logger.warning(f"Login failed: Missing username or password (username={username})")
             return jsonify({"success": False, "message": "Username and password are required"}), 400
-        
-        app.logger.info(f"Login attempt for user: {username}")
-        
         user_doc = db.users.find_one({"username": username})
         if not user_doc:
-            app.logger.warning(f"Login failed: User {username} not found")
+            app.logger.warning(f"Login failed: Username {username} does not exist")
             return jsonify({"success": False, "message": "Invalid credentials"}), 401
-        
         try:
             pw_check = bcrypt.checkpw(password.encode('utf-8'), user_doc["password"])
         except Exception as e:
-            app.logger.error(f"Password check error: {str(e)}")
+            app.logger.error(f"Login failed: Password check error for {username}: {str(e)}")
             return jsonify({"success": False, "message": "Authentication error"}), 500
-            
         if pw_check:
-            # Create user object and log them in with Flask-Login
             user = User.from_dict(user_doc)
             login_user(user)
-            
-            # Create JWT token
             token = jwt.encode({
                 'user_id': str(user_doc['_id']),
                 'username': username,
-                'exp': datetime.utcnow() + timedelta(days=1)  # Token expires in 1 day
+                'exp': datetime.utcnow() + timedelta(days=1)
             }, app.config['SECRET_KEY'], algorithm='HS256')
-            
-            app.logger.info(f"User {username} logged in successfully")
+            app.logger.info(f"Login success: {username}")
             return jsonify({
                 "success": True,
                 "token": token,
                 "username": username,
-                "redirect": "/lobby"  # Add explicit redirect URL
+                "redirect": "/lobby"
             }), 200
         else:
-            app.logger.warning(f"Login failed: Invalid password for user {username}")
+            app.logger.warning(f"Login failed: Wrong password for {username}")
             return jsonify({"success": False, "message": "Invalid credentials"}), 401
     except Exception as e:
-        app.logger.error(f"Login error: {str(e)}", exc_info=True)
+        app.logger.error(f"Login failed: {str(e)}")
         return jsonify({"success": False, "message": "Login failed, please try again"}), 500
 
 @app.route('/logout')
@@ -898,6 +867,82 @@ def check_auth():
     except Exception as e:
         app.logger.error(f"Auth check error: {str(e)}")
         return jsonify({'authenticated': False, 'message': 'Server error'}), 500
+
+# --- HTTP TRAFFIC LOGGER SETUP ---
+http_traffic_logger = logging.getLogger('http_traffic')
+http_traffic_logger.setLevel(logging.INFO)
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+http_traffic_handler = RotatingFileHandler('logs/http_traffic.log', maxBytes=1024*1024*10, backupCount=5)
+http_traffic_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+http_traffic_logger.addHandler(http_traffic_handler)
+
+import re
+from werkzeug.datastructures import Headers
+
+def scrub_auth_headers(headers):
+    clean_headers = {}
+    for k, v in headers.items():
+        if k.lower() == 'authorization':
+            continue
+        if k.lower() == 'cookie':
+            # Remove auth tokens from cookies
+            cookies = v.split(';')
+            filtered = [c for c in cookies if 'auth' not in c.lower() and 'token' not in c.lower()]
+            clean_headers[k] = ';'.join(filtered)
+        else:
+            clean_headers[k] = v
+    return clean_headers
+
+def is_text_content_type(content_type):
+    if not content_type:
+        return False
+    return any(t in content_type for t in ['text', 'json', 'xml', 'javascript', 'html', 'css'])
+
+@app.before_request
+def log_full_request():
+    path = request.path
+    method = request.method
+    ip = request.remote_addr or '-'
+    headers = scrub_auth_headers(dict(request.headers))
+    log_headers = f"Headers: {headers}"
+    # Only log headers for login/register
+    if path in ['/login', '/register']:
+        http_traffic_logger.info(f"REQUEST {method} {path} IP={ip} {log_headers}")
+        return
+    # Log body if text and not too large
+    content_type = request.content_type or ''
+    if is_text_content_type(content_type):
+        try:
+            body = request.get_data(as_text=True)[:2048]
+        except Exception:
+            body = '[UNREADABLE BODY]'
+        http_traffic_logger.info(f"REQUEST {method} {path} IP={ip} {log_headers} Body: {body}")
+    else:
+        http_traffic_logger.info(f"REQUEST {method} {path} IP={ip} {log_headers} [Non-text body not logged]")
+
+@app.after_request
+def log_full_response(response):
+    path = request.path
+    method = request.method
+    ip = request.remote_addr or '-'
+    headers = scrub_auth_headers(dict(response.headers))
+    log_headers = f"Headers: {headers}"
+    # Only log headers for login/register
+    if path in ['/login', '/register']:
+        http_traffic_logger.info(f"RESPONSE {method} {path} IP={ip} Status={response.status_code} {log_headers}")
+        return response
+    # Log body if text and not too large
+    content_type = response.content_type or ''
+    if is_text_content_type(content_type):
+        try:
+            body = response.get_data(as_text=True)[:2048]
+        except Exception:
+            body = '[UNREADABLE BODY]'
+        http_traffic_logger.info(f"RESPONSE {method} {path} IP={ip} Status={response.status_code} {log_headers} Body: {body}")
+    else:
+        http_traffic_logger.info(f"RESPONSE {method} {path} IP={ip} Status={response.status_code} {log_headers} [Non-text body not logged]")
+    return response
 
 if __name__ == '__main__':
     socketio.run(app, host='0.0.0.0', port=8080, debug=True)
