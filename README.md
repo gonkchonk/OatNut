@@ -1,50 +1,83 @@
-# Super Smash Bros-like MMO Game
+# Grid Combat Fighter
 
-A multiplayer online game built with Flask, WebSocket, and MongoDB.
+A real-time multiplayer grid-based combat game built with Flask and WebSocket.
 
-## 🚀 Live Demo
+## Features
 
-**Deployed At:** https://ilovejesse312.me  
+- Real-time multiplayer gameplay
+- Grid-based movement and combat
+- Melee and ranged attacks
+- User authentication
+- Persistent sessions
+- Custom avatars
+- Leaderboard system
+- Player statistics
 
----
+## Prerequisites
 
-## 🛠️ Features
+- Docker
+- Docker Compose
 
-- Real-time, continuous movement broadcast via WebSockets  
-- Room creation, join/leave, and dynamic in-game player lists  
-- Projectile & melee combat with health/lives tracking  
-- Persistent user accounts & stats in MongoDB  
+## Installation
 
----
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd gridcombatfighter
+```
 
-## Setup
+2. Start the application:
+```bash
+docker compose up
+```
 
-1. Make sure you have Docker installed
-3. Run `docker compose up` in the root directory
-4. Visit `http://localhost:8080` in your browser
+3. Access the game at http://localhost:8080
+
+## Game Controls
+
+- Arrow Keys: Move your character
+- Space: Melee attack
+- F: Ranged attack
 
 ## Development
 
-The project structure is organized as follows:
+The project is built using:
+- Flask (Python web framework)
+- Flask-SocketIO (WebSocket support)
+- PostgreSQL (Database)
+- HTML5 Canvas (Game rendering)
+
+## Project Structure
 
 ```
 .
-├── backend/               # Flask backend
-│   ├── __pycache__
-│   ├── app.py            # Main Flask application
-│   ├── models/           # Database models
-│   ├── routes/           # API routes
-│   ├── sockets/          # WebSocket handlers
-│   └── utils/            # Utility functions
-├── frontend/             # Frontend assets
-│   ├── static/           # Static files (CSS, JS)
-│   │   ├── css/
-│   │   ├── js/
-│   │   └── assets/      # Game assets (sprites, sounds)
-│   └── templates/        # Jinja2 templates
-├── logs/                 # Application logs
-├── docker-compose.yml    # Docker compose configuration
-├── Dockerfile           # Docker configuration
-├── requirements.txt     # Python dependencies
-└── README.md           
+├── app.py              # Main Flask application
+├── requirements.txt    # Python dependencies
+├── Dockerfile         # Docker configuration
+├── docker-compose.yml # Docker Compose configuration
+├── templates/         # HTML templates
+│   └── index.html    # Main game template
+└── logs/             # Application logs
 ```
+
+## Security Features
+
+- Password hashing with salting
+- Secure session management
+- HTTP-only cookies
+- Input validation
+- SQL injection prevention
+
+## Logging
+
+The application logs:
+- User authentication attempts
+- Game events
+- Server errors
+- Request/response information
+
+Logs are stored in the `logs` directory and persist between container restarts.
+
+## License
+
+MIT License 

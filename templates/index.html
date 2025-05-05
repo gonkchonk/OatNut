@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid Combat Fighter</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Orbitron', Arial, sans-serif;
+            background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+            min-height: 100vh;
+            color: #e0eaff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .sci-fi-panel {
+            background: rgba(20, 30, 50, 0.95);
+            border: 2px solid #00ffe7;
+            border-radius: 16px;
+            box-shadow: 0 0 24px #00ffe7, 0 0 4px #0ff inset;
+            padding: 32px 24px;
+            margin: 32px auto;
+            max-width: 420px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .sci-fi-title {
+            font-size: 2.2em;
+            color: #00ffe7;
+            letter-spacing: 2px;
+            text-shadow: 0 0 8px #00ffe7, 0 0 2px #fff;
+            margin-bottom: 24px;
+        }
+        .sci-fi-input {
+            width: 90%;
+            max-width: 320px;
+            padding: 12px;
+            margin: 12px 0;
+            border: none;
+            border-radius: 8px;
+            background: #1a2636;
+            color: #00ffe7;
+            font-size: 1.1em;
+            box-shadow: 0 0 8px #00ffe7 inset;
+            outline: none;
+            transition: box-shadow 0.2s;
+        }
+        .sci-fi-input:focus {
+            box-shadow: 0 0 16px #00ffe7, 0 0 8px #0ff inset;
+        }
+        .sci-fi-btn {
+            width: 100%;
+            padding: 14px;
+            margin: 10px 0;
+            background: linear-gradient(90deg, #00ffe7 0%, #00bfff 100%);
+            color: #0f2027;
+            font-weight: bold;
+            font-size: 1.1em;
+            border: none;
+            border-radius: 8px;
+            box-shadow: 0 0 16px #00ffe7, 0 0 4px #0ff inset;
+            cursor: pointer;
+            letter-spacing: 1px;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+        .sci-fi-btn:hover {
+            background: linear-gradient(90deg, #00bfff 0%, #00ffe7 100%);
+            box-shadow: 0 0 32px #00ffe7, 0 0 8px #0ff inset;
+        }
+        .sci-fi-link {
+            color: #00ffe7;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+        #auth-container {
+            max-width: 420px;
+            margin: 0 auto;
+            margin-top: 60px;
+        }
+        #lobby-container {
+            display: none;
+            margin: 40px auto 0 auto;
+            max-width: 900px;
+        }
+        #lobby-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+        .lobby-card {
+            background: rgba(20, 30, 50, 0.95);
+            border: 2px solid #00ffe7;
+            border-radius: 12px;
+            box-shadow: 0 0 16px #00ffe7, 0 0 2px #0ff inset;
+            padding: 18px 12px;
+            text-align: center;
+            color: #e0eaff;
+        }
+        .lobby-card h3 {
+            color: #00ffe7;
+            margin-bottom: 8px;
+        }
+        .lobby-card button {
+            margin-top: 10px;
+        }
+        #game-container {
+            display: none;
+            margin-top: 40px;
+            text-align: center;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        #game-canvas {
+            margin-left: auto;
+            margin-right: auto;
+            display: block;
+            border: 3px solid #00ffe7;
+            background: linear-gradient(135deg, #1a2636 0%, #203a43 100%);
+            box-shadow: 0 0 32px #00ffe7, 0 0 8px #0ff inset;
+            margin-top: 24px;
+            margin-bottom: 40px;
+        }
+        #user-info {
+            margin-bottom: 10px;
+            padding: 10px 20px;
+            background: rgba(20, 30, 50, 0.95);
+            border-radius: 8px;
+            border: 2px solid #00ffe7;
+            color: #00ffe7;
+            font-size: 1.1em;
+            box-shadow: 0 0 8px #00ffe7;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        #logout-btn {
+            background: linear-gradient(90deg, #ff1744 0%, #ff8a65 100%);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 18px;
+            font-size: 1em;
+            font-family: 'Orbitron', Arial, sans-serif;
+            font-weight: bold;
+            box-shadow: 0 0 12px #ff1744, 0 0 2px #fff inset;
+            cursor: pointer;
+            transition: background 0.2s, box-shadow 0.2s;
+        }
+        #logout-btn:hover {
+            background: linear-gradient(90deg, #ff8a65 0%, #ff1744 100%);
+            box-shadow: 0 0 24px #ff1744, 0 0 4px #fff inset;
+        }
+        #leaderboard, #achievements {
+            position: fixed;
+            top: 120px;
+            margin-top: 0;
+            background: rgba(20, 30, 50, 0.97);
+            padding: 18px 12px;
+            border-radius: 12px;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 16px #00ffe7, 0 0 2px #0ff inset;
+            color: #e0eaff;
+            max-width: 360px;
+            width: 100%;
+            z-index: 10;
+        }
+        #leaderboard {
+            right: 30px;
+        }
+        #achievements {
+            position: fixed;
+            top: 120px;
+            left: 30px;
+            background: rgba(20, 30, 50, 0.97);
+            padding: 12px;         /* ↓ cut padding in half */
+            border-radius: 12px;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 16px #00ffe7, 0 0 2px #0ff inset;
+            color: #e0eaff;
+            width: 200px;          /* ↓ force a smaller width */
+            max-width: none;
+            z-index: 10;
+        }
+        .achievement {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 5px;
+            border-radius: 4px;
+            background: rgba(0,255,231,0.08);
+            border: 1px solid #00ffe7;
+        }
+        .achievement img {
+            width: 32px;
+            height: 32px;
+            margin-right: 10px;
+            filter: drop-shadow(0 0 4px #00ffe7);
+        }
+        .achievement.locked {
+            opacity: 0.5;
+            filter: grayscale(1) blur(1px);
+        }
+        .player-avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            margin-right: 5px;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 8px #00ffe7;
+        }
+        /* make each entry a flex‐row, vertically centered */
+        #leaderboard-list .leaderboard-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;           /* space between avatar and text */
+            padding: 4px 0;     /* a bit of vertical breathing room */
+        }
+
+        #leaderboard-list .entry-username {
+            display: inline-block;    /* allow sizing */
+            min-width: 0;             /* needed to activate flex shrink */
+            flex: 1 1 auto;           /* let it shrink if too long */
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+/* keep the “— points, wins” always visible */
+        #leaderboard-list .entry-meta {
+            flex: 0 0 auto;
+            margin-left: 4px;
+        }
+
+        /* shrink the number/text down if needed */
+        #leaderboard-list .entry-number,
+        #leaderboard-list .entry-text {
+            white-space: nowrap;
+        }
+
+        /* avatar on left, nice round icon */
+        .player-avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 8px #00ffe7;
+            flex-shrink: 0;
+        }
+        .sci-fi-label {
+            color: #00ffe7;
+            font-size: 1.1em;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+        .form-group {
+            margin-bottom: 18px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        /* Notification styling */
+        #notifications {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: linear-gradient(90deg, #00ffe7 0%, #00bfff 100%);
+            color: #0f2027;
+            padding: 14px 32px;
+            border-radius: 12px;
+            font-size: 1.2em;
+            font-family: 'Orbitron', Arial, sans-serif;
+            box-shadow: 0 0 24px #00ffe7, 0 0 4px #0ff inset;
+            border: 2px solid #00ffe7;
+        }
+        #game-stats {
+            display: none;
+            position: fixed;
+            top: 120px;
+            right: 30px;
+            background: rgba(20, 30, 50, 0.97);
+            padding: 18px 12px;
+            border-radius: 12px;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 16px #00ffe7, 0 0 2px #0ff inset;
+            color: #e0eaff;
+            max-width: 220px;
+            z-index: 10;
+        }
+        #first-to-10 {
+            display: none;
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 30, 50, 0.97);
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: 2px solid #00ffe7;
+            box-shadow: 0 0 16px #00ffe7, 0 0 2px #0ff inset;
+            color: #00ffe7;
+            font-size: 1.2em;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            z-index: 10;
+        }
+        /* stick the uploader in the bottom-right corner */
+        #avatar-upload {
+            position: fixed;
+            bottom: 40px;     /* adjust up/down */
+            right: 40px;      /* adjust left/right */
+            z-index: 1000;    
+            text-align: right;/* keeps button on the right edge */
+        }
+        /* tighten up form layout */
+        #avatar-upload form {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #avatar-input {
+            display: none;
+        }
+        .player-stat {
+            margin-bottom: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .player-name {
+            color: #00ffe7;
+            font-weight: bold;
+        }
+        .player-details {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+        }
+        .player-score {
+            color: #e0eaff;
+        }
+        .player-lifetime {
+            color: #00ffe7;
+            font-size: 0.9em;
+            margin-top: 2px;
+        }
+        #crop-modal.crop-hidden { display: none; }
+        .crop-backdrop {
+        position: fixed; top:0; left:0; right:0; bottom:0;
+        background: rgba(0,0,0,0.6); z-index:1001;
+        }
+        .crop-box {
+        position: fixed; top:50%; left:50%;
+        transform: translate(-50%,-50%);
+        background: #1a2636; padding:16px; border-radius:8px;
+        box-shadow:0 0 16px #00ffe7; z-index:1002;
+        }
+        #crop-canvas {
+        border:2px solid #00ffe7;
+        cursor: grab;
+        display:block;
+        margin-bottom:12px;
+        }
+        .crop-buttons {
+        text-align:right;
+        }
+        .crop-buttons button {
+        margin-left:8px;
+        padding:6px 12px;
+        background:#00ffe7; border:none; border-radius:4px;
+        color:#0f2027; font-weight:bold; cursor:pointer;
+        }
+        .crop-buttons button:hover {
+        background:#00bfff;
+        }
+    </style>
+</head>
+<body>
+    <div id="auth-container">
+        <div id="login-form" class="sci-fi-panel">
+            <div class="sci-fi-title">Grid Combat Fighter</div>
+            <div class="sci-fi-label">Login</div>
+            <div class="form-group">
+                <input type="text" id="login-username" class="sci-fi-input" placeholder="Username">
+            </div>
+            <div class="form-group">
+                <input type="password" id="login-password" class="sci-fi-input" placeholder="Password">
+            </div>
+            <button class="sci-fi-btn" onclick="login()">Login</button>
+            <p>Don't have an account? <span class="sci-fi-link" onclick="toggleForms()">Register</span></p>
+        </div>
+        <div id="register-form" class="sci-fi-panel" style="display: none;">
+            <div class="sci-fi-title">Grid Combat Fighter</div>
+            <div class="sci-fi-label">Register</div>
+            <div class="form-group">
+                <input type="text" id="register-username" class="sci-fi-input" placeholder="Username">
+            </div>
+            <div class="form-group">
+                <input type="password" id="register-password" class="sci-fi-input" placeholder="Password">
+            </div>
+            <button class="sci-fi-btn" onclick="register()">Register</button>
+            <p>Already have an account? <span class="sci-fi-link" onclick="toggleForms()">Login</span></p>
+        </div>
+    </div>
+
+    <div id="lobby-container">
+        <div class="sci-fi-panel" style="max-width:900px;">
+            <div id="avatar-upload">
+                <input type="file" id="avatar-input" accept="image/*" hidden>
+                <button type="button" id="avatar-button" class="sci-fi-btn">Upload Avatar</button>
+              </div>
+              
+              <div id="crop-modal" class="crop-hidden">
+                <div class="crop-backdrop"></div>
+                <div class="crop-box">
+                  <img id="crop-image" style="max-width:100%; display:block;">
+                  <div class="crop-buttons">
+                    <button id="crop-confirm">Confirm</button>
+                    <button id="crop-cancel">Cancel</button>
+                  </div>
+                </div>
+              </div>
+            <div class="sci-fi-title">Game Lobbies</div>
+            <div id="lobby-list"></div>
+            <div class="form-group" style="display:flex;gap:12px;align-items:center;justify-content:center;">
+                <input type="text" id="new-lobby-name" class="sci-fi-input" placeholder="New Lobby Name" style="max-width:220px;">
+                <input type="number" id="new-lobby-max-players" class="sci-fi-input" value="4" min="2" max="8" style="max-width:100px;">
+                <button class="sci-fi-btn" style="max-width:180px;" onclick="createLobby()">Create Lobby</button>
+            </div>
+            <button id="logout-btn" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div id="game-container">
+        <div id="user-info"></div>
+        <canvas id="game-canvas" width="800" height="600"></canvas>
+    </div>
+
+    <div id="leaderboard">
+        <h3>Lifetime Leaderboard</h3>
+        <div id="leaderboard-list"></div>
+    </div>
+
+    <div id="game-stats">
+        <h3>Game Stats</h3>
+        <div id="game-stats-content"></div>
+    </div>
+
+    <div id="first-to-10">First to 10 kills!</div>
+
+    <div id="achievements">
+        <h3>Achievements</h3>
+        <div id="achievements-list"></div>
+    </div>
+
+    <script>
+        const avatarImages = {};
+        let socket = null;
+        const canvas = document.getElementById('game-canvas');
+        const ctx = canvas.getContext('2d');
+        const GRID_SIZE = 40;
+        const PLAYER_SIZE = 30;
+        
+        let currentUser = null;
+        let currentUserId = null;
+        let players = {};
+        let projectiles = [];
+        let achievements = [];
+        let inLobby = false;
+        let notifications = [];
+        let lastMoveTime = 0;
+        const MOVE_INTERVAL = 200; // ms, slower movement
+        let attackCooldown = false;
+        const ATTACK_INTERVAL = 400; // ms
+        let attackKeyDown = false;
+        let rangedKeyDown = false;
+
+        function toggleForms() {
+            const loginForm = document.getElementById('login-form');
+            const registerForm = document.getElementById('register-form');
+            loginForm.style.display = loginForm.style.display === 'none' ? 'block' : 'none';
+            registerForm.style.display = registerForm.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function login() {
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    currentUser = { username };
+                    // Connect socket after login
+                    socket = io();
+                    registerSocketHandlers();
+                    showLobbyContainer();
+                    loadLeaderboard();
+                    loadAchievements();
+                    setAchievementsVisibility();
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                alert('Login failed');
+            }
+        }
+
+        async function register() {
+            const username = document.getElementById('register-username').value;
+            const password = document.getElementById('register-password').value;
+
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert('Registration successful! Please login.');
+                    toggleForms();
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                console.error('Registration error:', error);
+                alert('Registration failed');
+            }
+        }
+
+        async function uploadAvatar(file, filename) {
+            const formData = new FormData();
+            formData.append('avatar', file, filename);
+
+            try {
+                const response = await fetch('/upload_avatar', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    alert('Avatar uploaded successfully!');
+                    loadLeaderboard(); // Refresh leaderboard to show new avatar
+                } else {
+                    alert(data.error);
+                }
+            } catch (error) {
+                console.error('Avatar upload error:', error);
+                alert('Avatar upload failed');
+            }
+        }
+
+        async function loadLeaderboard() {
+            try {
+                const response = await fetch('/leaderboard');
+                const data = await response.json();
+                const leaderboardList = document.getElementById('leaderboard-list');
+                leaderboardList.innerHTML = data.map((user, index) => {
+                // append ?t=timestamp so the browser always fetches a fresh copy
+                const src = user.avatar
+                    ? `/uploads/${user.avatar}?t=${Date.now()}`
+                    : '';
+                const imgTag = src ? `<img src="${src}" class="player-avatar">` : '';
+                return `
+                    <div class="leaderboard-entry">
+                    ${imgTag}
+                    <span class="entry-number">${index + 1}.</span>
+                    <span class="entry-username">${user.username}</span>
+                    <span class="entry-meta"> — ${user.score} points, ${user.wins} wins</span>
+                    </div>`;
+                }).join('');
+            } catch (err) {
+                console.error('Leaderboard load error:', err);
+            }
+        }
+
+        async function loadAchievements() {
+            try {
+                const response = await fetch('/achievements');
+                achievements = await response.json();
+                
+                const achievementsList = document.getElementById('achievements-list');
+                achievementsList.innerHTML = achievements.map(achievement => `
+                    <div class="achievement ${achievement.achieved ? '' : 'locked'}">
+                        <img src="/static/${achievement.icon}" alt="${achievement.name}">
+                        <div>
+                            <div>${achievement.name}</div>
+                            <small>${achievement.description}</small>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Achievements load error:', error);
+            }
+        }
+
+        async function loadLobbies() {
+            try {
+                const response = await fetch('/lobbies');
+                const lobbies = await response.json();
+                
+                const lobbyList = document.getElementById('lobby-list');
+                lobbyList.innerHTML = lobbies.map(lobby => `
+                    <div class="lobby-card">
+                        <h3>${lobby.name}</h3>
+                        <p>Players: ${lobby.player_count}/${lobby.max_players}</p>
+                        <button onclick="joinLobby(${lobby.id})" ${lobby.player_count >= lobby.max_players ? 'disabled' : ''}>
+                            Join Lobby
+                        </button>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Lobbies load error:', error);
+            }
+        }
+
+        async function createLobby() {
+            const name = document.getElementById('new-lobby-name').value;
+            const maxPlayers = parseInt(document.getElementById('new-lobby-max-players').value);
+
+            try {
+                const response = await fetch('/lobbies', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ name, max_players: maxPlayers })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    loadLobbies();
+                } else {
+                    alert('Failed to create lobby');
+                }
+            } catch (error) {
+                console.error('Create lobby error:', error);
+                alert('Failed to create lobby');
+            }
+        }
+
+        function joinLobby(lobbyId) {
+            if (socket) socket.emit('join_lobby', { lobby_id: lobbyId });
+        }
+
+        // Hide game area until in a game
+        document.getElementById('game-container').style.display = 'none';
+        function showLobbyContainer() {
+            document.getElementById('auth-container').style.display = 'none';
+            document.getElementById('lobby-container').style.display = 'block';
+            document.getElementById('game-container').style.display = 'none';
+            document.getElementById('leaderboard').style.display = 'block';
+            document.getElementById('game-stats').style.display = 'none';
+            document.getElementById('first-to-10').style.display = 'none';
+            loadLobbies();
+        }
+        function showGame() {
+            document.getElementById('lobby-container').style.display = 'none';
+            document.getElementById('game-container').style.display = 'block';
+            document.getElementById('leaderboard').style.display = 'none';
+            document.getElementById('game-stats').style.display = 'block';
+            document.getElementById('first-to-10').style.display = 'block';
+            document.getElementById('user-info').innerHTML = `Logged in as: <span style="color:#00ffe7;">${currentUser.username}</span> <button id="logout-btn" onclick="logout()">Logout</button> <button id="leave-lobby-btn" style="float:right;background:#dc3545;color:white;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;margin-left:10px;">Leave Lobby</button>`;
+            document.getElementById('leave-lobby-btn').onclick = leaveLobby;
+            canvas.style.background = 'linear-gradient(135deg, #1a2636 0%, #203a43 100%)';
+            canvas.style.border = '3px solid #00ffe7';
+            canvas.style.boxShadow = '0 4px 32px rgba(41,121,255,0.12)';
+            startGame();
+            renderGameStats();
+        }
+
+        function startGame() {
+            // Game loop
+            function gameLoop() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawGrid();
+                drawPlayers();
+                drawProjectiles();
+                requestAnimationFrame(gameLoop);
+            }
+
+            // Draw grid
+            function drawGrid() {
+                ctx.strokeStyle = '#e0e0e0';
+                ctx.lineWidth = 1;
+                for (let x = 0; x < canvas.width; x += GRID_SIZE) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, canvas.height);
+                    ctx.stroke();
+                }
+                for (let y = 0; y < canvas.height; y += GRID_SIZE) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(canvas.width, y);
+                    ctx.stroke();
+                }
+                // Add a soft background
+                ctx.save();
+                ctx.globalAlpha = 0.08;
+                ctx.fillStyle = '#2979ff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+            }
+
+            // Draw players
+            function drawPlayers() {
+                Object.entries(players).forEach(([id, player]) => {
+                    const px = player.position.x * GRID_SIZE + (GRID_SIZE - PLAYER_SIZE) / 2;
+                    const py = player.position.y * GRID_SIZE + (GRID_SIZE - PLAYER_SIZE) / 2;
+                    // Draw shadow
+                    ctx.save();
+                    ctx.globalAlpha = 0.25;
+                    ctx.beginPath();
+                    ctx.arc(px + PLAYER_SIZE / 2, py + PLAYER_SIZE - 2, PLAYER_SIZE / 2, 0, Math.PI * 2);
+                    ctx.fillStyle = '#222';
+                    ctx.filter = 'blur(2px)';
+                    ctx.fill();
+                    ctx.restore();
+                    // Draw avatar or colored circle
+                    if (player.avatar && avatarImages[id]?.complete) {
+                        const img = avatarImages[id];
+                        // 1) compute largest centered square in the source image
+                        const s  = Math.min(img.width, img.height);
+                        const sx = (img.width  - s) / 2;
+                        const sy = (img.height - s) / 2;
+
+                        // 2) clip to a circular mask
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(
+                        px + PLAYER_SIZE/2,
+                        py + PLAYER_SIZE/2,
+                        PLAYER_SIZE/2,
+                        0, Math.PI*2
+                        );
+                        ctx.clip();
+
+                        // 3) draw the center-cropped square into our 30×30 cell
+                        ctx.drawImage(
+                        img,
+                        sx, sy,       // source x,y
+                        s,  s,        // source width,height (square)
+                        px, py,       // destination x,y
+                        PLAYER_SIZE,  // destination width
+                        PLAYER_SIZE   // destination height
+                        );
+                        ctx.restore();
+                    } else {
+                        // fallback: draw solid circle as before
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(
+                        px + PLAYER_SIZE/2,
+                        py + PLAYER_SIZE/2,
+                        PLAYER_SIZE/2,
+                        0, Math.PI*2
+                        );
+                        ctx.fillStyle   = (id === currentUserId ? '#2979ff' : '#e53935');
+                        ctx.shadowColor = (id === currentUserId ? '#2979ff' : '#e53935');
+                        ctx.shadowBlur  = 10;
+                        ctx.fill();
+                        ctx.restore();
+                    }
+                    // Draw health bar (with background)
+                    ctx.save();
+                    ctx.fillStyle = '#fff';
+                    ctx.fillRect(px, py - 18, PLAYER_SIZE, 10);
+                    ctx.strokeStyle = '#bbb';
+                    ctx.strokeRect(px, py - 18, PLAYER_SIZE, 10);
+                    ctx.fillStyle = '#43a047';
+                    ctx.fillRect(px, py - 18, PLAYER_SIZE * (player.health / 100), 10);
+                    ctx.restore();
+                    // Draw username and score with background
+                    ctx.save();
+                    ctx.font = 'bold 15px "Segoe UI", Arial, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+                    const label = `${player.username} (${player.lifetime_score})`;
+                    const labelX = px + PLAYER_SIZE / 2;
+                    const labelY = py - 22;
+                    const metrics = ctx.measureText(label);
+                    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                    ctx.fillRect(labelX - metrics.width / 2 - 6, labelY - 18, metrics.width + 12, 22);
+                    ctx.strokeStyle = '#bbb';
+                    ctx.strokeRect(labelX - metrics.width / 2 - 6, labelY - 18, metrics.width + 12, 22);
+                    ctx.fillStyle = '#222';
+                    ctx.fillText(label, labelX, labelY);
+                    ctx.restore();
+                });
+            }
+
+            // Draw projectiles
+            function drawProjectiles() {
+                // No-op: do not draw attack circles
+            }
+
+            // Handle keyboard input
+            let keys = {};
+            window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+            window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+            function handleMovement() {
+                if (!inLobby || !currentUserId) return;
+                const player = players[currentUserId];
+                if (!player) return;
+
+                let moved = false;
+                const newPosition = { ...player.position };
+                let direction = null;
+
+                if (keys['w'] && player.position.y > 0) {
+                    newPosition.y--; moved = true; direction = 'up';
+                }
+                if (keys['s'] && player.position.y < canvas.height/GRID_SIZE - 1) {
+                    newPosition.y++; moved = true; direction = 'down';
+                }
+                if (keys['a'] && player.position.x > 0) {
+                    newPosition.x--; moved = true; direction = 'left';
+                }
+                if (keys['d'] && player.position.x < canvas.width/GRID_SIZE - 1) {
+                    newPosition.x++; moved = true; direction = 'right';
+                }
+
+                const now = Date.now();
+                if (moved && now - lastMoveTime > MOVE_INTERVAL) {
+                    socket.emit('move', { position: newPosition });
+                    lastMoveTime = now;
+                }
+
+                // melee only:
+                if (keys[' ']) {
+                    if (!attackCooldown) {
+                        socket.emit('attack', {
+                            type: 'melee',
+                            position: player.position
+                        });
+                        attackCooldown = true;
+                        setTimeout(() => { attackCooldown = false; }, 500);
+                    }
+                }
+            }
+
+
+            // Start game loop
+            setInterval(handleMovement, 1000 / 60);
+            gameLoop();
+        }
+
+        function registerSocketHandlers() {
+            socket.on('player_joined', (data) => {
+                players = JSON.parse(JSON.stringify(data.players)); // Deep copy to avoid reference issues
+                Object.entries(players).forEach(([id, p]) => {
+                    if (p.avatar && !avatarImages[id]) {
+                        const img = new Image();
+                        img.src = `/uploads/${p.avatar}?t=${Date.now()}`;
+                        avatarImages[id] = img;
+                    }
+                });
+
+                if (!inLobby) {
+                    currentUserId = data.current_user_id;
+                    inLobby = true;
+                    showGame();
+                }
+                });
+            socket.on('player_left', (data) => {
+                delete players[data.player_id];
+                renderGameStats();
+            });
+            socket.on('player_moved', (data) => {
+                if (players[data.player_id]) {
+                    players[data.player_id].position = data.position;
+                    renderGameStats();
+                }
+            });
+            socket.on('attack_launched', (data) => {
+                const projectile = {
+                    position: { ...data.position },
+                    direction: data.direction,
+                    type: data.type
+                };
+                projectiles.push(projectile);
+                setTimeout(() => {
+                    const index = projectiles.indexOf(projectile);
+                    if (index > -1) {
+                        projectiles.splice(index, 1);
+                    }
+                }, 1000);
+            });
+            socket.on('player_stats_updated', (data) => {
+                if (players[data.player_id]) {
+                    players[data.player_id].health = data.health;
+                    players[data.player_id].kills = data.kills;
+                    players[data.player_id].deaths = data.deaths;
+                    players[data.player_id].lifetime_score = data.lifetime_score;
+                    players[data.player_id].wins = data.wins;
+                    if (typeof data.position !== 'undefined') {
+                        players[data.player_id].position = data.position;
+                    }
+                    if (data.player_id === currentUserId && data.health <= 0) {
+                        showNotification('You died! Respawning...');
+                    }
+                }
+                loadLeaderboard();
+                renderGameStats();
+            });
+            socket.on('achievement_unlocked', (data) => {
+                showNotification(`Achievement Unlocked: ${data.name} - ${data.description}`);
+                loadAchievements();
+            });
+            socket.on('join_error', (data) => {
+                alert('Failed to join lobby: ' + (data.error || 'Unknown error'));
+            });
+            socket.on('game_won', (data) => {
+                showNotification(`Game Over! Winner: ${data.winner}`);
+            });
+        }
+
+        function showNotification(message) {
+            notifications.push(message);
+            renderNotifications();
+            setTimeout(() => {
+                notifications.shift();
+                renderNotifications();
+            }, 3000);
+        }
+        function renderNotifications() {
+            let notifDiv = document.getElementById('notifications');
+            if (!notifDiv) {
+                notifDiv = document.createElement('div');
+                notifDiv.id = 'notifications';
+                notifDiv.style.position = 'fixed';
+                notifDiv.style.top = '20px';
+                notifDiv.style.left = '50%';
+                notifDiv.style.transform = 'translateX(-50%)';
+                notifDiv.style.zIndex = '1000';
+                notifDiv.style.background = 'rgba(0,0,0,0.7)';
+                notifDiv.style.color = 'white';
+                notifDiv.style.padding = '10px 20px';
+                notifDiv.style.borderRadius = '8px';
+                notifDiv.style.fontSize = '18px';
+                document.body.appendChild(notifDiv);
+            }
+            notifDiv.innerHTML = notifications.join('<br>');
+            notifDiv.style.display = notifications.length ? 'block' : 'none';
+        }
+        function leaveLobby() {
+            if (socket && inLobby) {
+                socket.emit('leave_lobby');
+            }
+            inLobby = false;
+            players = {};
+            currentUserId = null;
+            document.getElementById('game-container').style.display = 'none';
+            document.getElementById('lobby-container').style.display = 'block';
+            document.getElementById('leaderboard').style.display = 'block';
+            document.getElementById('game-stats').style.display = 'none';
+            loadLobbies();
+        }
+        async function logout() {
+            try {
+                const response = await fetch('/logout');
+                if (response.ok) {
+                    // Reset UI and state
+                    currentUser = null;
+                    currentUserId = null;
+                    players = {};
+                    inLobby = false;
+                    if (socket) { socket.disconnect(); socket = null; }
+                    document.getElementById('auth-container').style.display = 'block';
+                    document.getElementById('lobby-container').style.display = 'none';
+                    document.getElementById('game-container').style.display = 'none';
+                    setAchievementsVisibility();
+                }
+            } catch (e) {
+                alert('Logout failed');
+            }
+        }
+
+        // Controls panel: make collapsible
+        const controlsPanel = document.createElement('div');
+        controlsPanel.style.position = 'fixed';
+        controlsPanel.style.bottom = '40px';
+        controlsPanel.style.left = '40px';
+        controlsPanel.style.transform = 'none';
+        controlsPanel.style.background = 'rgba(20,30,50,0.97)';
+        controlsPanel.style.border = '2px solid #00ffe7';
+        controlsPanel.style.borderRadius = '12px';
+        controlsPanel.style.boxShadow = '0 0 16px #00ffe7, 0 0 2px #0ff inset';
+        controlsPanel.style.color = '#e0eaff';
+        controlsPanel.style.fontFamily = "'Orbitron', Arial, sans-serif";
+        controlsPanel.style.fontSize = '1.1em';
+        controlsPanel.style.padding = '18px 32px 18px 32px';
+        controlsPanel.style.zIndex = '100';
+        controlsPanel.style.transition = 'height 0.2s, padding 0.2s';
+        controlsPanel.style.overflow = 'hidden';
+        controlsPanel.id = 'controls-panel';
+        let controlsContent = `
+            <div style="color:#00ffe7;font-size:1.2em;margin-bottom:8px;">Controls</div>
+            <div><b>WASD</b>: Move</div>
+            <div><b>Space</b>: Melee Attack</div>
+        `;
+        controlsPanel.innerHTML = `<button id='controls-toggle' style="position:absolute;top:8px;right:8px;background:#00ffe7;color:#222;border:none;border-radius:6px;padding:2px 10px;font-family:'Orbitron',Arial,sans-serif;font-size:1em;cursor:pointer;z-index:101;">-</button><div id='controls-content'>${controlsContent}</div>`;
+        document.body.appendChild(controlsPanel);
+        let collapsed = false;
+        document.getElementById('controls-toggle').onclick = function() {
+            collapsed = !collapsed;
+            const content = document.getElementById('controls-content');
+            if (collapsed) {
+                content.style.display = 'none';
+                controlsPanel.style.padding = '8px 16px 8px 16px';
+                this.textContent = '+';
+            } else {
+                content.style.display = 'block';
+                controlsPanel.style.padding = '18px 32px 18px 32px';
+                this.textContent = '-';
+            }
+        };
+
+        // Ensure leaderboard and achievements are always visible
+        document.getElementById('leaderboard').style.display = 'block';
+        document.getElementById('achievements').style.display = 'block';
+        // Load leaderboard and achievements on page load
+        loadLeaderboard();
+        loadAchievements();
+
+        // Only show achievements if logged in
+        function setAchievementsVisibility() {
+            const achievementsPanel = document.getElementById('achievements');
+            if (currentUser) {
+                achievementsPanel.style.display = 'block';
+            } else {
+                achievementsPanel.style.display = 'none';
+            }
+        }
+        // Call on page load and after login/logout
+        setAchievementsVisibility();
+
+        function renderGameStats() {
+            const statsContent = document.getElementById('game-stats-content');
+            if (!statsContent) return;
+
+            // Build array of {username, wins, kills}, sorted by kills desc
+            const stats = Object.values(players)
+                .map(p => ({
+                    username: p.username,
+                    wins:     p.wins   || 0,
+                    kills:    p.kills  || 0
+                }))
+                .sort((a, b) => b.kills - a.kills);
+
+            statsContent.innerHTML = stats.map(p => `
+                <div class="player-stat">
+                    (${p.wins} wins) ${p.username}: ${p.kills} kills
+                </div>
+            `).join('');
+        }
+
+        function handlePlayerKill(killerId, victimId) {
+            if (players[killerId]) {
+                players[killerId].kills = (players[killerId].kills || 0) + 1;
+                if (players[killerId].kills >= 10) {
+                    // Game over - announce winner
+                    socket.emit('game_over', { winner: killerId });
+                    alert(`${players[killerId].username} wins the game!`);
+                    leaveLobby();
+                }
+            }
+            if (players[victimId]) {
+                players[victimId].deaths = (players[victimId].deaths || 0) + 1;
+            }
+            renderGameStats();
+        }
+            // forward button → file picker
+            const avatarInput = document.getElementById('avatar-input');
+            const avatarButton = document.getElementById('avatar-button');
+            const modal = document.getElementById('crop-modal');
+            const img = document.getElementById('crop-image');
+            const btnOk = document.getElementById('crop-confirm');
+            const btnCancel = document.getElementById('crop-cancel');
+            let cropper;
+
+            avatarButton.addEventListener('click', () => avatarInput.click());
+
+            avatarInput.addEventListener('change', () => {
+            if (!avatarInput.files.length) return;
+            const file = avatarInput.files[0];
+            if (!file.type.startsWith('image/')) {
+                alert('Invalid file type');
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            img.onload = () => {
+                modal.classList.remove('crop-hidden');
+                if (cropper) cropper.destroy();
+                cropper = new Cropper(img, {
+                aspectRatio: 1,
+                viewMode: 1,
+                autoCropArea: 1,
+                });
+            };
+            img.src = url;
+            });
+
+            btnCancel.addEventListener('click', () => {
+            modal.classList.add('crop-hidden');
+            cropper.destroy();
+            cropper = null;
+            avatarInput.value = '';
+            });
+
+            btnOk.addEventListener('click', () => {
+                if (!cropper) return;
+
+                // grab the original filename now, before we clear the input
+                const originalFile = avatarInput.files[0];
+                const originalName = originalFile.name;
+
+                // export a 300×300 blob and upload it
+                cropper.getCroppedCanvas({ width: 300, height: 300 })
+                    .toBlob(blob => {
+                    console.log('Uploading avatar blob as', originalName);
+                    uploadAvatar(blob, originalName);
+
+                    // now it’s safe to clear the input
+                    avatarInput.value = '';
+                    }, 'image/png');
+
+                // hide and destroy cropper
+                modal.classList.add('crop-hidden');
+                cropper.destroy();
+                cropper = null;
+            });
+      </script>
+</body>
+</html> 
